@@ -10,6 +10,16 @@ import moe
 def create_path_template_func():
     return [media_encoding]
 
+media_subs = {
+    "digital media": "WEB"
+}
+
+def standardized_album_media(album):
+    if album.media and album.media.lower() in media_subs:
+        return media_subs[album.media.lower()]
+    else:
+        return album.media
+
 def album_audio_format(album):
     audio_formats = [track.audio_format for track in album.tracks]
     audio_formats = list(set(audio_formats))
@@ -45,7 +55,7 @@ def album_sample_rate(album):
         return "+".join(map(pretty_sample_rate, bit_depths)) + "kHz"
 
 def media_encoding(album):
-    media = album.media
+    media = standardized_album_media(album)
     audio_format = album_audio_format(album)
     bit_depth = album_bit_depth(album)
     sample_rate = album_sample_rate(album)
