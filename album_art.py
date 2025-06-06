@@ -13,6 +13,13 @@ from mutagen.flac import FLAC, Picture
 from mutagen.id3 import APIC, ID3, ID3NoHeaderError
 from PIL import Image
 from sqlalchemy.orm.session import Session
+from prompt_toolkit import Application
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import Layout
+from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.application import get_app
 
 import moe
 from moe import config
@@ -324,54 +331,121 @@ def open_image_viewer(image_path):
 
 
 def create_image_selector_with_preview(choices, image_files, prompt_text):
-    """Create an interactive image selector with preview functionality."""
-    print(f"\n{prompt_text}")
-    print("💡 Options:")
-    print("   • Enter the number to select an image")
-    print("   • Type 'v' followed by a number to preview an image (e.g., 'v1' to preview first image)")
-    print("   • Type 'skip' to skip embedding")
-    print()
+    """Create an interactive image selector with arrow key navigation and preview."""
+    if not choices:
+        return None
 
-    for i, choice in enumerate(choices[:-1]):
-        print(f"   {i + 1}. {choice}")
-    print(f"   {len(choices)}. {choices[-1]}")
+    class ImageSelector:
+        def __init__(self, choices, image_files, prompt_text):
+            self.choices = choices
+            self.image_files = image_files
+            self.prompt_text = prompt_text
+            self.selected_index = 0
+            self.result = None
 
-    while True:
-        try:
-            user_input = input("\n🎨 Your choice: ").strip().lower()
+        def get_formatted_text(self):
+            """Generate the formatted text for the current state."""
+            lines = [
+                ("class:title", f"{self.prompt_text}\n"),
+                ("class:info", "💡 Use ↑/↓ to navigate, Enter to select, 'v' to preview, 'q' to quit\n\n"),
+            ]
 
-            if user_input == 'skip' or user_input == str(len(choices)):
-                return choices[-1]
-
-            if user_input.startswith('v') and len(user_input) > 1:
-                try:
-                    view_index = int(user_input[1:]) - 1
-                    if 0 <= view_index < len(image_files):
-                        selected_image = image_files[view_index]
-                        print(f"🖼️  Opening {selected_image.name} in image viewer...")
-                        open_image_viewer(selected_image)
-                        continue
+            for i, choice in enumerate(self.choices):
+                if i == self.selected_index:
+                    if i < len(self.image_files):
+                        lines.append(("class:selected", f"❯ {choice}\n"))
                     else:
-                        print(f"❌ Invalid image number. Please choose 1-{len(image_files)}")
-                        continue
-                except ValueError:
-                    print("❌ Invalid format. Use 'v' followed by a number (e.g., 'v1')")
-                    continue
-
-            try:
-                choice_index = int(user_input) - 1
-                if 0 <= choice_index < len(choices):
-                    return choices[choice_index]
+                        lines.append(("class:selected_skip", f"❯ {choice}\n"))
                 else:
-                    print(f"❌ Invalid choice. Please choose 1-{len(choices)}")
-                    continue
-            except ValueError:
-                print("❌ Invalid input. Enter a number, 'v' + number to preview, or 'skip'")
-                continue
+                    lines.append(("class:normal", f"  {choice}\n"))
 
-        except (KeyboardInterrupt, EOFError):
-            print("\n⏭️  Skipping album art embedding.")
-            return choices[-1]
+            return FormattedText(lines)
+
+        def move_up(self):
+            if self.selected_index > 0:
+                self.selected_index -= 1
+
+        def move_down(self):
+            if self.selected_index < len(self.choices) - 1:
+                self.selected_index += 1
+
+        def select_current(self):
+            self.result = self.choices[self.selected_index]
+            get_app().exit()
+
+        def preview_current(self):
+            if self.selected_index < len(self.image_files):
+                selected_image = self.image_files[self.selected_index]
+                open_image_viewer(selected_image)
+
+        def quit(self):
+            self.result = self.choices[-1]  # Skip option
+            get_app().exit()
+
+    selector = ImageSelector(choices, image_files, prompt_text)
+
+    # Create key bindings
+    kb = KeyBindings()
+
+    @kb.add('up')
+    @kb.add('k')  # Vim-style
+    def move_up(event):
+        selector.move_up()
+
+    @kb.add('down')
+    @kb.add('j')  # Vim-style
+    def move_down(event):
+        selector.move_down()
+
+    @kb.add('enter')
+    def select(event):
+        selector.select_current()
+
+    @kb.add('v')
+    def preview(event):
+        selector.preview_current()
+
+    @kb.add('q')
+    @kb.add('c-c')  # Ctrl+C
+    def quit(event):
+        selector.quit()
+
+    # Create the layout
+    def get_content():
+        return selector.get_formatted_text()
+
+    layout = Layout(
+        HSplit([
+            Window(
+                content=FormattedTextControl(get_content),
+                wrap_lines=True,
+            )
+        ])
+    )
+
+    # Create and run the application
+    app = Application(
+        layout=layout,
+        key_bindings=kb,
+        full_screen=False,
+        mouse_support=False,
+    )
+
+    # Custom style
+    style_dict = {
+        'title': '#ansiblue bold',
+        'info': '#ansiyellow',
+        'selected': '#ansigreen bold',
+        'selected_skip': '#ansired bold',
+        'normal': '',
+    }
+
+    try:
+        app.run()
+        return selector.result
+    except (KeyboardInterrupt, EOFError):
+        print("\n⏭️  Skipping album art embedding.")
+        return choices[-1]
 
 
 def create_image_choices(image_files: List[Path]) -> List[str]:
