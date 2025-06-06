@@ -1,7 +1,9 @@
 import argparse
 import io
+import json
 import shlex
 import subprocess
+import urllib.request
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -306,6 +308,105 @@ def get_source_directory(tracks):
     return first_track_path.parent
 
 
+def fetch_album_art_with_covit(artist: str, album: str, output_dir: Path) -> Optional[Path]:
+    """Fetch album art using the covit command."""
+    try:
+        covit_path = Path(__file__).parent / "covit"
+        if not covit_path.exists():
+            print(f"❌ covit executable not found at {covit_path}")
+            return None
+
+        # Prepare the covit command
+        cmd = [
+            str(covit_path),
+            "--address", "https://covers.musichoarders.xyz/",
+            "--query-artist", artist,
+            "--query-album", album
+        ]
+
+        print(f"🌐 Searching for album art: {artist} - {album}")
+        print("   Please select an image from the web interface...")
+
+        # Run covit and capture output
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes timeout
+            )
+
+            # Parse the JSON output (covit returns 1 even on success)
+            output_lines = result.stdout.strip().split('\n')
+            json_line = None
+            for line in output_lines:
+                if line.startswith('Picked: '):
+                    json_line = line[8:]  # Remove 'Picked: ' prefix
+                    break
+
+            if not json_line:
+                if result.returncode != 0 and result.stderr:
+                    print(f"❌ covit command failed: {result.stderr}")
+                else:
+                    print("⏭️  No image was selected from the web interface.")
+                return None
+
+            try:
+                picked_data = json.loads(json_line)
+            except json.JSONDecodeError as e:
+                print(f"❌ Failed to parse covit output: {e}")
+                return None
+
+            # Get the image URL (prefer big cover)
+            image_url = picked_data.get('bigCoverUrl') or picked_data.get('smallCoverUrl')
+            if not image_url:
+                print("❌ No image URL found in covit response")
+                return None
+
+            # Get image info
+            cover_info = picked_data.get('coverInfo', {})
+            format_ext = cover_info.get('format', 'jpg')
+
+            # Generate filename
+            safe_artist = "".join(c for c in artist if c.isalnum() or c in (' ', '-', '_')).strip()
+            safe_album = "".join(c for c in album if c.isalnum() or c in (' ', '-', '_')).strip()
+            filename = f"{safe_artist} - {safe_album}_cover.{format_ext}"
+            output_path = output_dir / filename
+
+            # Download the image
+            print(f"⬇️  Downloading album art...")
+            with urllib.request.urlopen(image_url) as response:
+                image_data = response.read()
+
+            with open(output_path, 'wb') as f:
+                f.write(image_data)
+
+            print(f"✅ Downloaded album art: {output_path.name}")
+
+            # Display info about the downloaded image
+            try:
+                with Image.open(output_path) as img:
+                    width, height = img.size
+                    print(f"   📐 Dimensions: {width}×{height} pixels")
+                    print(f"   🖼️  Format: {img.format}")
+                    print(f"   📊 Size: {format_file_size(len(image_data))}")
+            except Exception:
+                pass
+
+            return output_path
+
+        except subprocess.TimeoutExpired:
+            print("❌ covit command timed out after 5 minutes")
+            return None
+        except Exception as e:
+            print(f"❌ Error running covit: {e}")
+            return None
+
+    except Exception as e:
+        print(f"❌ Error in fetch_album_art_with_covit: {e}")
+        return None
+
+
 # =============================================================================
 # INTERACTIVE EMBEDDING - User interaction and embedding functionality
 # =============================================================================
@@ -330,16 +431,19 @@ def open_image_viewer(image_path):
         return False
 
 
-def create_image_selector_with_preview(choices, image_files, prompt_text):
+def create_image_selector_with_preview(choices, image_files, prompt_text, album_artist=None, album_title=None, output_dir=None):
     """Create an interactive image selector with arrow key navigation and preview."""
     if not choices:
         return None
 
     class ImageSelector:
-        def __init__(self, choices, image_files, prompt_text):
+        def __init__(self, choices, image_files, prompt_text, album_artist=None, album_title=None, output_dir=None):
             self.choices = choices
             self.image_files = image_files
             self.prompt_text = prompt_text
+            self.album_artist = album_artist
+            self.album_title = album_title
+            self.output_dir = output_dir
             self.selected_index = 0
             self.result = None
 
@@ -354,6 +458,8 @@ def create_image_selector_with_preview(choices, image_files, prompt_text):
                 if i == self.selected_index:
                     if i < len(self.image_files):
                         lines.append(("class:selected", f"❯ {choice}\n"))
+                    elif choice == "🌐 Fetch album art online":
+                        lines.append(("class:selected_fetch", f"❯ {choice}\n"))
                     else:
                         lines.append(("class:selected_skip", f"❯ {choice}\n"))
                 else:
@@ -370,7 +476,8 @@ def create_image_selector_with_preview(choices, image_files, prompt_text):
                 self.selected_index += 1
 
         def select_current(self):
-            self.result = self.choices[self.selected_index]
+            selected_choice = self.choices[self.selected_index]
+            self.result = selected_choice
             get_app().exit()
 
         def preview_current(self):
@@ -382,18 +489,16 @@ def create_image_selector_with_preview(choices, image_files, prompt_text):
             self.result = self.choices[-1]  # Skip option
             get_app().exit()
 
-    selector = ImageSelector(choices, image_files, prompt_text)
+    selector = ImageSelector(choices, image_files, prompt_text, album_artist, album_title, output_dir)
 
     # Create key bindings
     kb = KeyBindings()
 
     @kb.add('up')
-    @kb.add('k')  # Vim-style
     def move_up(event):
         selector.move_up()
 
     @kb.add('down')
-    @kb.add('j')  # Vim-style
     def move_down(event):
         selector.move_down()
 
@@ -423,22 +528,26 @@ def create_image_selector_with_preview(choices, image_files, prompt_text):
         ])
     )
 
+    # Custom style
+    from prompt_toolkit.styles import Style
+
+    style = Style.from_dict({
+        'title': '#ansiblue bold',
+        'info': '#ansiyellow',
+        'selected': '#ansigreen bold',
+        'selected_fetch': '#ansicyan bold',
+        'selected_skip': '#ansired bold',
+        'normal': '',
+    })
+
     # Create and run the application
     app = Application(
         layout=layout,
         key_bindings=kb,
+        style=style,
         full_screen=False,
         mouse_support=False,
     )
-
-    # Custom style
-    style_dict = {
-        'title': '#ansiblue bold',
-        'info': '#ansiyellow',
-        'selected': '#ansigreen bold',
-        'selected_skip': '#ansired bold',
-        'normal': '',
-    }
 
     try:
         app.run()
@@ -462,6 +571,7 @@ def create_image_choices(image_files: List[Path]) -> List[str]:
         except Exception:
             choices.append(f"{image_path.name} (Unable to read)")
 
+    choices.append("🌐 Fetch album art online")
     choices.append("Skip embedding")
     return choices
 
@@ -510,21 +620,46 @@ def prompt_and_embed_album_art(tracks, image_files):
         target_tracks = tracks
 
     choices = create_image_choices(image_files)
-    selected = create_image_selector_with_preview(
-        choices,
-        image_files,
-        f"Select album art to embed in {len(target_tracks)} track(s):"
-    )
+    album = target_tracks[0].album if target_tracks else None
+    source_dir = get_source_directory(target_tracks) if target_tracks else None
 
-    if selected == "Skip embedding" or not selected:
-        print("⏭️  Skipping album art embedding.")
-        return
+    # Handle covit integration outside the prompt_toolkit loop
+    while True:
+        selected = create_image_selector_with_preview(
+            choices,
+            image_files,
+            f"Select album art to embed in {len(target_tracks)} track(s):",
+            album_artist=album.artist if album else None,
+            album_title=album.title if album else None,
+            output_dir=source_dir
+        )
 
-    selected_index = choices.index(selected)
-    if selected_index >= len(image_files):
-        return
+        if selected == "Skip embedding" or not selected:
+            print("⏭️  Skipping album art embedding.")
+            return
 
-    selected_image = image_files[selected_index]
+        if selected == "🌐 Fetch album art online":
+            if album and album.artist and album.title and source_dir:
+                fetched_image = fetch_album_art_with_covit(album.artist, album.title, source_dir)
+                if fetched_image:
+                    image_files.append(fetched_image)
+                    choices = create_image_choices(image_files)
+                    continue  # Restart the selection with updated choices
+                else:
+                    continue  # Restart the selection if covit failed
+            else:
+                print("❌ Cannot fetch album art: Missing album information")
+                continue
+
+        # Regular image selection
+        try:
+            selected_index = choices.index(selected)
+            if selected_index >= len(image_files):
+                continue
+            selected_image = image_files[selected_index]
+            break
+        except ValueError:
+            continue
 
     print(f"\n🎨 Embedding {selected_image.name} into {len(target_tracks)} track(s)...")
 
@@ -542,21 +677,34 @@ def prompt_and_embed_album_art(tracks, image_files):
 def embed_art_for_files(audio_files: List[Path], image_files: List[Path]):
     """Embed album art for a list of audio files."""
     choices = create_image_choices(image_files)
-    selected = create_image_selector_with_preview(
-        choices,
-        image_files,
-        f"Select album art to embed in {len(audio_files)} file(s):"
-    )
+    output_dir = audio_files[0].parent if audio_files else None
 
-    if selected == "Skip embedding" or not selected:
-        print("⏭️  Skipping album art embedding.")
-        return
+    # Handle covit integration outside the prompt_toolkit loop
+    while True:
+        selected = create_image_selector_with_preview(
+            choices,
+            image_files,
+            f"Select album art to embed in {len(audio_files)} file(s):",
+            output_dir=output_dir
+        )
 
-    selected_index = choices.index(selected)
-    if selected_index >= len(image_files):
-        return
+        if selected == "Skip embedding" or not selected:
+            print("⏭️  Skipping album art embedding.")
+            return
 
-    selected_image = image_files[selected_index]
+        if selected == "🌐 Fetch album art online":
+            print("❌ Cannot fetch album art: Album information not available for files")
+            continue
+
+        # Regular image selection
+        try:
+            selected_index = choices.index(selected)
+            if selected_index >= len(image_files):
+                continue
+            selected_image = image_files[selected_index]
+            break
+        except ValueError:
+            continue
 
     print(f"\n🎨 Embedding {selected_image.name} into {len(audio_files)} file(s)...")
 
