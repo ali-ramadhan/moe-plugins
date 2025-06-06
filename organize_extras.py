@@ -3,8 +3,6 @@ import moe
 
 from pathlib import Path
 
-import traceback
-
 @moe.hookimpl
 def create_path_template_func():
     return [organize_extras]
@@ -48,7 +46,6 @@ def _organize_extras(extra):
         return extra.path.name
 
 def organize_extras(extra):
-    traceback.print_stack()
     new_path = _organize_extras(extra)
     print(f"Processing extra: {extra.path} -> {new_path}")
     return new_path
