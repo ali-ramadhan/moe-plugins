@@ -25,7 +25,7 @@ from prompt_toolkit.application import get_app
 
 import moe
 from moe import config
-from moe.library import Album, Track
+from moe.library import Track
 
 
 @dataclass
@@ -100,18 +100,29 @@ def print_album_art_info(file_name: str, art_info: AlbumArtInfo):
             print(f"🚫 {file_name}: No embedded album art found")
         return
 
-    print(f"🎨 {file_name}: Album art found")
+    # Build details string
+    details = []
 
     if art_info.width and art_info.height and art_info.format:
-        print(f"   📐 Dimensions: {art_info.width}×{art_info.height} pixels")
-        print(f"   🖼️  Format: {art_info.format}")
+        details.append(f"{art_info.width}×{art_info.height}")
+        details.append(art_info.format)
+
+        # Add aspect ratio if not square
+        aspect_ratio = art_info.width / art_info.height
+        if not (0.99 <= aspect_ratio <= 1.01):  # Not approximately square
+            details.append(f"{aspect_ratio:.3f}:1")
 
     if art_info.size_bytes:
         size_str = format_file_size(art_info.size_bytes)
-        print(f"   📊 Size: {size_str}")
+        details.append(size_str)
+
+    # Create the single line output
+    details_str = " | ".join(details) if details else "details unavailable"
 
     if art_info.error:
-        print(f"   ❌ Could not analyze image details: {art_info.error}")
+        print(f"🎨 {file_name}: Album art found ({details_str}) - Warning: {art_info.error}")
+    else:
+        print(f"🎨 {file_name}: Album art found ({details_str})")
 
 
 def format_file_size(size_bytes: int) -> str:
@@ -248,56 +259,39 @@ def analyze_image_file(image_path):
     """Analyze and display information about an image file."""
     try:
         file_size = image_path.stat().st_size
-        size_str = format_file_size(file_size)
 
         with Image.open(image_path) as image:
             width, height = image.size
             image_format = image.format
 
-        filename_lower = image_path.name.lower()
-        is_likely_cover = any(term in filename_lower for term in [
-            'cover', 'front', 'folder', 'album', 'artwork'
-        ])
+        # Create AlbumArtInfo for consistency
+        art_info = AlbumArtInfo(
+            has_art=True,
+            width=width,
+            height=height,
+            format=image_format,
+            size_bytes=file_size
+        )
 
-        cover_indicator = "🎨" if is_likely_cover else "🖼️ "
-
-        print(f"{cover_indicator} {image_path.name}")
-        print(f"   📐 Dimensions: {width}×{height} pixels")
-        print(f"   🖼️  Format: {image_format}")
-        print(f"   📊 Size: {size_str}")
-
-        pixel_count = width * height
-        if pixel_count >= 1000000:
-            quality = "High resolution"
-        elif pixel_count >= 500000:
-            quality = "Good resolution"
-        elif pixel_count >= 250000:
-            quality = "Medium resolution"
-        else:
-            quality = "Low resolution"
-
-        print(f"   ⭐ Quality: {quality}")
-
-        aspect_ratio = width / height
-        if 0.9 <= aspect_ratio <= 1.1:
-            if pixel_count >= 500000:
-                print(f"   ✅ Recommended for album art")
-            else:
-                print(f"   ⚠️  Small for album art")
-        else:
-            print(f"   ⚠️  Non-square aspect ratio ({aspect_ratio:.2f}:1)")
-        print()
+        print_album_art_info(image_path.name, art_info)
 
     except Exception as e:
         try:
             file_size = image_path.stat().st_size
-            size_str = format_file_size(file_size)
-            print(f"🖼️  {image_path.name} ({size_str})")
-            print(f"   ❌ Could not analyze image: {e}")
-            print()
+            # Create AlbumArtInfo with error
+            art_info = AlbumArtInfo(
+                has_art=True,
+                size_bytes=file_size,
+                error=str(e)
+            )
+            print_album_art_info(image_path.name, art_info)
         except Exception as e2:
-            print(f"❌ {image_path.name}: Error reading file - {e2}")
-            print()
+            # Create AlbumArtInfo with error for file access issues
+            art_info = AlbumArtInfo(
+                has_art=False,
+                error=f"Error reading file - {e2}"
+            )
+            print_album_art_info(image_path.name, art_info)
 
 
 def get_source_directory(tracks):
@@ -387,11 +381,23 @@ def fetch_album_art_with_covit(artist: str, album: str, output_dir: Path) -> Opt
             try:
                 with Image.open(output_path) as img:
                     width, height = img.size
-                    print(f"   📐 Dimensions: {width}×{height} pixels")
-                    print(f"   🖼️  Format: {img.format}")
-                    print(f"   📊 Size: {format_file_size(len(image_data))}")
-            except Exception:
-                pass
+                    # Create AlbumArtInfo for consistency
+                    art_info = AlbumArtInfo(
+                        has_art=True,
+                        width=width,
+                        height=height,
+                        format=img.format,
+                        size_bytes=len(image_data)
+                    )
+                    print_album_art_info(output_path.name, art_info)
+            except Exception as e:
+                # Create AlbumArtInfo with error
+                art_info = AlbumArtInfo(
+                    has_art=True,
+                    size_bytes=len(image_data),
+                    error=str(e)
+                )
+                print_album_art_info(output_path.name, art_info)
 
             return output_path
 
