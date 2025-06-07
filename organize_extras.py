@@ -14,7 +14,7 @@ def _organize_extras(extra):
     album = extra.album
 
     # Define patterns
-    cover_pattern = re.compile(r"^(cover|folder)\.(jpg|jpeg|png)$", re.IGNORECASE)
+    cover_pattern = re.compile(r"^.*(cover|folder).*\.(jpg|jpeg|png)$", re.IGNORECASE)
     cue_log_pattern = re.compile(r"^.*\.(cue|log)$", re.IGNORECASE)
     artwork_folder_pattern = re.compile(r"^(scan|scans|artwork)$", re.IGNORECASE)
 
