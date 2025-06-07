@@ -6,6 +6,7 @@ Users can select which extra files to keep using checkboxes.
 """
 
 import logging
+import subprocess
 from collections import defaultdict
 from typing import List, Set
 
@@ -20,6 +21,7 @@ from prompt_toolkit.styles import Style
 from sqlalchemy.orm.session import Session
 
 import moe
+import moe.config
 from moe.library import Extra, Album
 
 __all__ = []
@@ -63,9 +65,21 @@ class ExtrasFilterSelector:
         """Generate the formatted text for the current state."""
         artist = self.album.artist or "Unknown Artist"
         title = self.album.title or "Unknown Album"
+
+        # Check if text editor is configured
+        try:
+            text_editor = moe.config.CONFIG.settings.filter_extras.text_editor
+        except (AttributeError, KeyError):
+            text_editor = None
+
+        if text_editor:
+            help_text = "💡 Use ↑/↓ to navigate, Space to toggle, Enter to confirm, 'a' to select all, 'n' to select none, 'o' to open, 't' for text editor, 'q' to quit\n\n"
+        else:
+            help_text = "💡 Use ↑/↓ to navigate, Space to toggle, Enter to confirm, 'a' to select all, 'n' to select none, 'o' to open, 'q' to quit\n\n"
+
         lines = [
             ("class:title", f"Filter extra files for: {artist} - {title}\n"),
-            ("class:info", "💡 Use ↑/↓ to navigate, Space to toggle, Enter to confirm, 'a' to select all, 'n' to select none, 'q' to quit\n\n"),
+            ("class:info", help_text),
         ]
 
         for i, extra in enumerate(self.extras):
@@ -102,6 +116,46 @@ class ExtrasFilterSelector:
 
     def select_none(self):
         self.selected_extras.clear()
+
+    def open_current_file(self):
+        """Open the currently selected file using xdg-open."""
+        if 0 <= self.current_index < len(self.extras):
+            current_extra = self.extras[self.current_index]
+            try:
+                subprocess.run(
+                    ['xdg-open', str(current_extra.path)],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                log.debug(f"Opened file: {current_extra.path}")
+            except (subprocess.SubprocessError, FileNotFoundError) as e:
+                log.error(f"Failed to open file {current_extra.path}: {e}")
+
+    def open_current_file_in_editor(self):
+        """Open the currently selected file in a text editor."""
+        if 0 <= self.current_index < len(self.extras):
+            current_extra = self.extras[self.current_index]
+
+            # Get text editor from config
+            try:
+                text_editor = moe.config.CONFIG.settings.filter_extras.text_editor
+            except (AttributeError, KeyError):
+                text_editor = None
+
+            if text_editor:
+                try:
+                    subprocess.run(
+                        [text_editor, str(current_extra.path)],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    log.debug(f"Opened file in editor: {current_extra.path}")
+                except (subprocess.SubprocessError, FileNotFoundError) as e:
+                    log.error(f"Failed to open file in editor {current_extra.path}: {e}")
+            else:
+                log.warning("No text editor configured in moe config")
 
     def confirm_selection(self):
         self.result = [self.extras[i] for i in self.selected_extras]
@@ -141,6 +195,21 @@ def create_extras_filter_interface(extras: List[Extra], album: Album) -> List[Ex
     @kb.add('n')
     def select_none(event):
         selector.select_none()
+
+    @kb.add('o')
+    def open_file(event):
+        selector.open_current_file()
+
+    # Only add text editor binding if configured
+    try:
+        text_editor = moe.config.CONFIG.settings.filter_extras.text_editor
+    except (AttributeError, KeyError):
+        text_editor = None
+
+    if text_editor:
+        @kb.add('t')
+        def open_in_editor(event):
+            selector.open_current_file_in_editor()
 
     @kb.add('enter')
     def confirm(event):
