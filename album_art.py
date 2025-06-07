@@ -3,6 +3,7 @@ import io
 import json
 import shlex
 import subprocess
+import tempfile
 import urllib.request
 from collections import defaultdict
 from dataclasses import dataclass
@@ -360,11 +361,15 @@ def fetch_album_art_with_covit(artist: str, album: str, output_dir: Path) -> Opt
             cover_info = picked_data.get('coverInfo', {})
             format_ext = cover_info.get('format', 'jpg')
 
-            # Generate filename
-            safe_artist = "".join(c for c in artist if c.isalnum() or c in (' ', '-', '_')).strip()
-            safe_album = "".join(c for c in album if c.isalnum() or c in (' ', '-', '_')).strip()
-            filename = f"{safe_artist} - {safe_album}_cover.{format_ext}"
-            output_path = output_dir / filename
+            # Get source for filename
+            source = picked_data.get('source', 'unknown')
+
+            # Generate filename using covit source and save to temp directory
+            filename = f"cover_covit_{source}.{format_ext}"
+            # Use temporary directory instead of modifying source directory
+            temp_dir = Path(tempfile.gettempdir()) / "moe_album_art"
+            temp_dir.mkdir(exist_ok=True)
+            output_path = temp_dir / filename
 
             # Download the image
             print(f"⬇️  Downloading album art...")
