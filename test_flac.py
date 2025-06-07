@@ -159,15 +159,6 @@ def pre_add(item):
         TestFlacError: If any FLAC files in the item's folder are invalid.
     """
     if isinstance(item, Album):
-        # Validate the album folder
-        console.print(
-            f"[bold cyan]Pre-add FLAC validation for album folder:[/bold cyan] [not bold yellow]{item.path}[/not bold yellow]"
-        )
         validate_flac_folder(item.path)
     elif isinstance(item, Track) and item.path.suffix.lower() == '.flac':
-        # Validate the folder containing the FLAC track
-        folder_path = item.path.parent
-        console.print(
-            f"[bold cyan]Pre-add FLAC validation for track folder:[/bold cyan] [not bold yellow]{folder_path}[/not bold yellow]"
-        )
-        validate_flac_folder(folder_path)
+        validate_flac_folder(item.path.parent)
