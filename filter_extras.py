@@ -262,25 +262,26 @@ def create_extras_filter_interface(extras: List[Extra], album: Album) -> List[Ex
 @moe.hookimpl
 def edit_new_items(session: Session, items):
     """Filter extra files before they are finalized in the database."""
-    # Group extras by album ID
+    # Group extras by album object ID to handle new albums and avoid hashability issues
     albums_with_extras = defaultdict(list)
+    album_id_to_album = {}  # Map album IDs back to album objects
 
     for item in items:
         if isinstance(item, Extra):
-            albums_with_extras[item.album._id].append(item)
+            album_obj_id = id(item.album)
+            albums_with_extras[album_obj_id].append(item)
+            album_id_to_album[album_obj_id] = item.album
 
     # Keep track of extras to remove
     extras_to_remove_global = []
 
     # Process each album's extras
-    for album_id, extras in albums_with_extras.items():
+    for album_obj_id, extras in albums_with_extras.items():
         if len(extras) <= 1:
             # Skip filtering if there's only one or no extras
             continue
 
-        # Get the album from the first extra (they all have the same album)
-        album = extras[0].album
-
+        album = album_id_to_album[album_obj_id]
         print(f"\n📁 Found {len(extras)} extra files for: {album.artist} - {album.title}")
 
         # Show the interactive filter interface
