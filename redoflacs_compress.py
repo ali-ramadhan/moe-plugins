@@ -8,11 +8,12 @@ Files are compressed in-place to maintain library organization.
 
 import logging
 import subprocess
-import shutil
 from pathlib import Path
 from typing import Set
 
+import dynaconf
 import moe
+from moe import config
 from moe.library import Album, Track
 from rich.console import Console
 from sqlalchemy.orm import Session
@@ -50,6 +51,17 @@ def add_hooks(pm):
     """Register compress_flac hookspecs to Moe."""
     from redoflacs_compress import Hooks
     pm.add_hookspecs(Hooks)
+
+
+@moe.hookimpl
+def add_config_validator(settings):
+    """Add configuration validators for redoflacs_compress plugin."""
+    validators = [
+        dynaconf.Validator("REDOFLACS_COMPRESS.GLOBAL_JOBS", default=None, cast=int),
+        dynaconf.Validator("REDOFLACS_COMPRESS.COMPRESSION_JOBS", default=None, cast=int),
+        dynaconf.Validator("REDOFLACS_COMPRESS.COMPRESSION_THREADS", default=None, cast=int),
+    ]
+    settings.validators.register(*validators)
 
 
 def _folder_contains_flac(folder_path: Path) -> bool:
@@ -127,6 +139,43 @@ def _format_file_size(size_bytes: int) -> str:
     return f"{size_bytes:.2f} B"
 
 
+def _build_redoflacs_command(folder_path: Path) -> list[str]:
+    """Build the redoflacs command with configured job options.
+
+    Args:
+        folder_path: Path to the folder containing FLAC files.
+
+    Returns:
+        List of command arguments for redoflacs.
+    """
+    cmd = ['redoflacs', '-c']  # compression operation
+
+    # Get configuration values
+    try:
+        global_jobs = config.CONFIG.settings.redoflacs_compress.global_jobs
+        if global_jobs is not None:
+            cmd.extend([f'-j{global_jobs}'])
+    except (AttributeError, KeyError):
+        pass
+
+    try:
+        compression_jobs = config.CONFIG.settings.redoflacs_compress.compression_jobs
+        if compression_jobs is not None:
+            cmd.extend([f'-J{compression_jobs}'])
+    except (AttributeError, KeyError):
+        pass
+
+    try:
+        compression_threads = config.CONFIG.settings.redoflacs_compress.compression_threads
+        if compression_threads is not None:
+            cmd.extend([f'-T{compression_threads}'])
+    except (AttributeError, KeyError):
+        pass
+
+    cmd.append(str(folder_path))
+    return cmd
+
+
 @moe.hookimpl
 def compress_flac_folder(folder_path: Path) -> None:
     """Compress all FLAC files in a folder using redoflacs.
@@ -164,10 +213,12 @@ def compress_flac_folder(folder_path: Path) -> None:
         return
 
     try:
-        # Run 'redoflacs' to compress all FLAC files in the folder
-        # This command compresses files in-place
+        # Build redoflacs command with configured job options
+        cmd = _build_redoflacs_command(folder_path)
+
+        # Run redoflacs to compress all FLAC files in the folder
         result = subprocess.run(
-            ['redoflacs', str(folder_path)],
+            cmd,
             timeout=600  # 10 minute timeout for folder compression
         )
 
