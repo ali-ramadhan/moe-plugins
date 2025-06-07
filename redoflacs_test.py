@@ -11,7 +11,9 @@ import subprocess
 from pathlib import Path
 from typing import Any, Set
 
+import dynaconf
 import moe
+from moe import config
 from moe.library import Album, Track
 from rich.console import Console
 
@@ -45,9 +47,18 @@ class Hooks:
 
 @moe.hookimpl
 def add_hooks(pm):
-    """Register test_flac hookspecs to Moe."""
-    from test_flac import Hooks
+    """Register redoflacs_test hookspecs to Moe."""
+    from redoflacs_test import Hooks
     pm.add_hookspecs(Hooks)
+
+
+@moe.hookimpl
+def add_config_validator(settings):
+    """Add configuration validators for redoflacs_test plugin."""
+    validators = [
+        dynaconf.Validator("REDOFLACS_TEST.GLOBAL_JOBS", default=None, cast=int),
+    ]
+    settings.validators.register(*validators)
 
 
 def _folder_contains_flac(folder_path: Path) -> bool:
@@ -65,6 +76,29 @@ def _folder_contains_flac(folder_path: Path) -> bool:
     for file_path in folder_path.rglob("*.flac"):
         return True
     return False
+
+
+def _build_redoflacs_command(folder_path: Path) -> list[str]:
+    """Build the redoflacs command with configured job options.
+
+    Args:
+        folder_path: Path to the folder containing FLAC files.
+
+    Returns:
+        List of command arguments for redoflacs.
+    """
+    cmd = ['redoflacs', '-t']  # test operation
+
+    # Get configuration values
+    try:
+        global_jobs = config.CONFIG.settings.redoflacs_test.global_jobs
+        if global_jobs is not None:
+            cmd.append(f'-j{global_jobs}')
+    except (AttributeError, KeyError):
+        pass
+
+    cmd.append(str(folder_path))
+    return cmd
 
 
 @moe.hookimpl
@@ -90,10 +124,13 @@ def validate_flac_folder(folder_path: Path) -> None:
     )
 
     try:
-        # Run 'redoflacs -t' to test all FLAC files in the folder
+        # Build redoflacs command with configured job options
+        cmd = _build_redoflacs_command(folder_path)
+
+        # Run redoflacs to test all FLAC files in the folder
         # Don't capture output - let it show directly to the user
         result = subprocess.run(
-            ['redoflacs', '-t', str(folder_path)],
+            cmd,
             timeout=300  # 5 minute timeout for folder validation
         )
 
