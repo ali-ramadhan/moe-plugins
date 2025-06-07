@@ -1,7 +1,10 @@
 import re
 import moe
+from rich.console import Console
 
 from pathlib import Path
+
+console = Console()
 
 @moe.hookimpl
 def create_path_template_func():
@@ -47,5 +50,7 @@ def _organize_extras(extra):
 
 def organize_extras(extra):
     new_path = _organize_extras(extra)
-    print(f"Processing extra: {extra.path} -> {new_path}")
+    console.print(
+        f"[bold cyan]Processing extra:[/bold cyan] [not bold yellow]{extra.path}[/not bold yellow] [bold cyan]->[/bold cyan] [not bold green]{new_path}[/not bold green]"
+    )
     return new_path
