@@ -25,7 +25,7 @@ from prompt_toolkit.application import get_app
 
 import moe
 from moe import config
-from moe.library import Track
+from moe.library import Album, Extra
 
 
 @dataclass
@@ -237,11 +237,10 @@ def scan_directory_for_images(directory):
                 image_files.append(file_path)
 
         if not image_files:
-            print(f"\n🖼️  No image files found in: {directory}")
+            print(f"🖼️  No image files found in: {directory}")
             return []
 
-        print(f"\n🖼️  Image Files Found in: {directory}")
-        print("-" * 50)
+        print(f"🖼️  Image Files Found in: {directory}")
 
         image_files.sort(key=lambda x: x.stat().st_size, reverse=True)
 
@@ -821,7 +820,7 @@ def analyze_directory_album_art(directory: Path, recursive: bool = False, embed:
 
 
 # =============================================================================
-# IMPORT HOOK - Integration with Moe's import system
+# IMPORT HOOKS - Integration with Moe's import system
 # =============================================================================
 
 @moe.hookimpl
@@ -834,31 +833,184 @@ def add_config_validator(settings):
 
 
 @moe.hookimpl
-def process_new_items(session: Session, items):
-    """Analyze album art in tracks when they're being imported/added."""
-    albums_to_tracks = defaultdict(list)
+def pre_add(item):
+    """Select and potentially download album art before files are moved."""
+    if not isinstance(item, Album):
+        return
 
-    for item in items:
-        if isinstance(item, Track):
-            albums_to_tracks[item.album._id].append(item)
+    album = item
 
-    for album_id, tracks in albums_to_tracks.items():
-        if not tracks:
-            continue
+    # Skip if we've already processed this album
+    if 'album_art_processed' in album.custom:
+        return
 
-        album = tracks[0].album
-        print(f"\n{'='*60}")
-        print(f"🎵 Album: {album.artist} - {album.title}")
-        print(f"{'='*60}")
+    # Mark this album as processed to avoid duplicate processing
+    album.custom['album_art_processed'] = True
 
-        print("\n📀 Embedded Album Art Analysis:")
-        print("-" * 35)
-        for track in tracks:
+    # Get source directory from album path
+    source_dir = album.path
+
+    print("\n📀 Embedded Album Art Analysis:")
+    print("-" * 35)
+
+    # Analyze existing embedded art in all tracks
+    if album.tracks:
+        # Sort tracks by disc and track number for consistent display
+        sorted_tracks = sorted(album.tracks, key=lambda t: (t.disc, t.track_num))
+        for track in sorted_tracks:
             art_info = analyze_audio_file_album_art(track.path)
             print_album_art_info(track.path.name, art_info)
 
-        source_dir = get_source_directory(tracks)
-        if source_dir:
-            image_files = scan_directory_for_images(source_dir)
-            if image_files:
-                prompt_and_embed_album_art(tracks, image_files)
+    # Look for image files in the source directory
+    image_files = scan_directory_for_images(source_dir)
+
+    if image_files:
+        # Use the interactive selection interface
+        choices = create_image_choices(image_files)
+
+        # Handle covit integration outside the prompt_toolkit loop
+        while True:
+            selected = create_image_selector_with_preview(
+                choices,
+                image_files,
+                f"Select album art for: {album.artist} - {album.title}",
+                album_artist=album.artist,
+                album_title=album.title,
+                output_dir=source_dir
+            )
+
+            if selected == "Skip embedding" or not selected:
+                print("⏭️  Skipping album art selection.")
+                return
+
+            if selected == "🌐 Fetch album art online":
+                if album and album.artist and album.title:
+                    fetched_image = fetch_album_art_with_covit(album.artist, album.title, source_dir)
+                    if fetched_image:
+                        image_files.append(fetched_image)
+                        choices = create_image_choices(image_files)
+                        continue  # Restart the selection with updated choices
+                    else:
+                        continue  # Restart the selection if covit failed
+                else:
+                    print("❌ Cannot fetch album art: Missing album information")
+                    continue
+
+            # Regular image selection
+            try:
+                selected_index = choices.index(selected)
+                if selected_index >= len(image_files):
+                    continue
+                selected_image = image_files[selected_index]
+                break
+            except ValueError:
+                continue
+
+        # Store the selected image path for later processing
+        album.custom['selected_album_art_source'] = str(selected_image)
+        print(f"✅ Selected album art: {selected_image.name}")
+
+
+@moe.hookimpl
+def edit_new_items(session: Session, items):
+    """Create album art Extra files before organize_extras runs."""
+    albums_to_process = []
+
+    # Collect albums that need art files created
+    for item in items:
+        if isinstance(item, Album) and 'selected_album_art_source' in item.custom:
+            albums_to_process.append(item)
+
+    # Create Extra files for selected album art
+    for album in albums_to_process:
+        source_path = Path(album.custom['selected_album_art_source'])
+
+        if not source_path.exists():
+            print(f"⚠️  Selected album art no longer exists: {source_path}")
+            del album.custom['selected_album_art_source']
+            continue
+
+        # Check if the selected image is already an Extra in the album
+        existing_extra = None
+        for extra in album.extras:
+            if extra.path == source_path:
+                existing_extra = extra
+                break
+
+        if existing_extra:
+            # The selected image is already an Extra, just mark it for embedding
+            print(f"✅ Using existing album art extra: {source_path.name}")
+        else:
+            # Create a new Extra for the original file - organize_extras will handle renaming
+            art_extra = Extra(album, source_path)
+            items.append(art_extra)
+            print(f"✅ Added album art extra: {source_path.name}")
+
+        # Store reference for embedding later (we'll find the organized file)
+        album.custom['album_art_selected'] = True
+        # Clean up the source reference
+        del album.custom['selected_album_art_source']
+
+
+@moe.hookimpl
+def process_new_items(session: Session, items):
+    """Embed album art after files have been moved and organized."""
+    albums_to_process = []
+
+    # Find albums that have art to embed
+    for item in items:
+        if isinstance(item, Album) and 'album_art_selected' in item.custom:
+            albums_to_process.append(item)
+
+    # Embed art in each album's tracks
+    for album in albums_to_process:
+        tracks = album.tracks
+
+        # Find the album art Extra file
+        # Look for image files in the album's extras
+        art_extra = None
+
+        for extra in album.extras:
+            # Look for any image file - prioritize files with album title in name
+            if extra.path.suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}:
+                # If the filename contains the album title or artist, prefer it
+                filename_lower = extra.path.name.lower()
+                album_title_lower = album.title.lower()
+                album_artist_lower = album.artist.lower() if album.artist else ""
+
+                if (album_title_lower in filename_lower or
+                    album_artist_lower in filename_lower or
+                    "cover" in filename_lower or
+                    "folder" in filename_lower):
+                    art_extra = extra
+                    break
+
+        # If no preferred file found, just use any image file
+        if not art_extra:
+            for extra in album.extras:
+                if extra.path.suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}:
+                    art_extra = extra
+                    break
+
+        if art_extra and art_extra.path.exists():
+            print(f"\n🎨 Embedding {art_extra.path.name} into {len(tracks)} track(s)...")
+
+            success_count = 0
+            for track in tracks:
+                if embed_album_art_in_file(track.path, art_extra.path):
+                    success_count += 1
+                    print(f"✅ {track.path.name}")
+                else:
+                    print(f"❌ {track.path.name}")
+
+            print(f"🎉 Successfully embedded album art in {success_count}/{len(tracks)} tracks!")
+        else:
+            # Art file might have been filtered out or not found, that's okay
+            print(f"ℹ️  No album art file found for embedding in: {album.artist} - {album.title}")
+            # This could happen if the user filtered out the art file in filter_extras
+
+        # Clean up custom fields
+        if 'album_art_selected' in album.custom:
+            del album.custom['album_art_selected']
+        if 'album_art_processed' in album.custom:
+            del album.custom['album_art_processed']

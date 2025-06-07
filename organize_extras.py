@@ -51,6 +51,6 @@ def _organize_extras(extra):
 def organize_extras(extra):
     new_path = _organize_extras(extra)
     console.print(
-        f"[bold cyan]Processing extra:[/bold cyan] [not bold yellow]{extra.path}[/not bold yellow] [bold cyan]->[/bold cyan] [not bold green]{new_path}[/not bold green]"
+        f"[bold cyan]Determined extra path:[/bold cyan] [not bold yellow]{extra.path}[/not bold yellow] [bold cyan]->[/bold cyan] [not bold green]{new_path}[/not bold green]"
     )
     return new_path
