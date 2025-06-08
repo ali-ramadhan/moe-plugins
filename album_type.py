@@ -8,7 +8,14 @@ organizes them into appropriate directory structures.
 import logging
 from typing import Optional
 
-import questionary
+from prompt_toolkit import Application
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import Layout
+from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.application import get_app
+from prompt_toolkit.styles import Style
 
 import moe
 from moe.library import Album
@@ -85,6 +92,7 @@ def _auto_detect_album_type(album: Album) -> Optional[str]:
 def _prompt_for_album_type(album: Album, default_choice: Optional[str] = None) -> Optional[str]:
     """Prompt the user to classify the album type."""
     try:
+        # Show album info first
         print(f"\n🎵 Album Classification Required")
         print(f"Artist: {album.artist}")
         print(f"Title: {album.title}")
@@ -104,39 +112,31 @@ def _prompt_for_album_type(album: Album, default_choice: Optional[str] = None) -
 
         print("-" * 50)
 
-        # Create choices with icons and determine default index
-        choices = [
-            questionary.Choice("🎶 Regular Album", ALBUM_TYPE_REGULAR),
-            questionary.Choice("📀 Compilation/Various Artists", ALBUM_TYPE_COMPILATION),
-            questionary.Choice("🎬 Soundtrack/Score", ALBUM_TYPE_SOUNDTRACK),
-            questionary.Choice("🎼 Classical Music", ALBUM_TYPE_CLASSICAL),
-            questionary.Choice("❓ Skip classification", None),
+        # Create the album type selector
+        choice_data = [
+            (ALBUM_TYPE_REGULAR, "🎶 Regular Album"),
+            (ALBUM_TYPE_COMPILATION, "📀 Compilation/Various Artists"),
+            (ALBUM_TYPE_SOUNDTRACK, "🎬 Soundtrack/Score"),
+            (ALBUM_TYPE_CLASSICAL, "🎼 Classical Music"),
+            (None, "❓ Skip classification"),
         ]
 
-        # Find the default choice index
-        default_index = 0  # Default to regular album
-        if default_choice:
-            for i, choice in enumerate(choices):
-                if choice.value == default_choice:
-                    default_index = i
-                    break
-
-        choice = questionary.select(
+        selected_type = _create_album_type_selector(
             "How would you like to categorize this album?",
-            choices=choices,
-            default=choices[default_index]
-        ).ask()
+            choice_data,
+            default_choice
+        )
 
-        if choice:
+        if selected_type:
             type_labels = {
                 ALBUM_TYPE_REGULAR: "regular album",
                 ALBUM_TYPE_COMPILATION: "compilation",
                 ALBUM_TYPE_SOUNDTRACK: "soundtrack",
                 ALBUM_TYPE_CLASSICAL: "classical music"
             }
-            print(f"✅ Classified as: {type_labels.get(choice, 'unknown')}")
+            print(f"✅ Classified as: {type_labels.get(selected_type, 'unknown')}")
 
-        return choice
+        return selected_type
 
     except (KeyboardInterrupt, EOFError):
         print("\n⏭️  Skipping album classification.")
@@ -144,6 +144,123 @@ def _prompt_for_album_type(album: Album, default_choice: Optional[str] = None) -
     except Exception as e:
         log.error(f"Error during album type prompting: {e}")
         return None
+
+
+def _create_album_type_selector(prompt_text: str, choice_data: list, default_choice: Optional[str] = None) -> Optional[str]:
+    """Create an interactive album type selector using prompt_toolkit."""
+
+    class AlbumTypeSelector:
+        def __init__(self, prompt_text: str, choice_data: list, default_choice: Optional[str] = None):
+            self.prompt_text = prompt_text
+            self.choice_data = choice_data  # List of (value, display_text) tuples
+            self.selected_index = 0
+            self.result = None
+
+            # Set default selection
+            if default_choice:
+                for i, (value, _) in enumerate(choice_data):
+                    if value == default_choice:
+                        self.selected_index = i
+                        break
+
+        def get_formatted_text(self):
+            """Generate the formatted text for the current state."""
+            lines = [
+                ("class:question", f"{self.prompt_text}\n"),
+                ("class:info", "💡 Use ↑/↓ to navigate, Enter to select, 'q' to quit\n\n"),
+            ]
+
+            for i, (value, display_text) in enumerate(self.choice_data):
+                if i == self.selected_index:
+                    if value is None:  # Skip option
+                        lines.append(("class:selected_skip", f"❯ {display_text}\n"))
+                    else:
+                        lines.append(("class:selected", f"❯ {display_text}\n"))
+                else:
+                    lines.append(("class:normal", f"  {display_text}\n"))
+
+            return FormattedText(lines)
+
+        def move_up(self):
+            if self.selected_index > 0:
+                self.selected_index -= 1
+
+        def move_down(self):
+            if self.selected_index < len(self.choice_data) - 1:
+                self.selected_index += 1
+
+        def select_current(self):
+            value, _ = self.choice_data[self.selected_index]
+            self.result = value
+            get_app().exit()
+
+        def quit(self):
+            self.result = None
+            get_app().exit()
+
+    if not choice_data:
+        return None
+
+    selector = AlbumTypeSelector(prompt_text, choice_data, default_choice)
+
+    # Create key bindings
+    kb = KeyBindings()
+
+    @kb.add('up')
+    def move_up(event):
+        selector.move_up()
+
+    @kb.add('down')
+    def move_down(event):
+        selector.move_down()
+
+    @kb.add('enter')
+    def select(event):
+        selector.select_current()
+
+    @kb.add('q')
+    @kb.add('c-c')  # Ctrl+C
+    def quit(event):
+        selector.quit()
+
+    # Create the layout
+    def get_content():
+        return selector.get_formatted_text()
+
+    layout = Layout(
+        HSplit([
+            Window(
+                content=FormattedTextControl(get_content),
+                wrap_lines=True,
+            )
+        ])
+    )
+
+    # Create and run the application
+    app = Application(
+        layout=layout,
+        key_bindings=kb,
+        style=_get_prompt_style(),
+        full_screen=False,
+        mouse_support=False,
+    )
+
+    try:
+        app.run()
+        return selector.result
+    except (KeyboardInterrupt, EOFError):
+        return None
+
+
+def _get_prompt_style():
+    """Get the style for prompt_toolkit components."""
+    return Style.from_dict({
+        'question': '#ansiblue bold',
+        'info': '#ansiyellow',
+        'selected': '#ansigreen bold',
+        'selected_skip': '#ansired bold',
+        'normal': '',
+    })
 
 
 def classify_album_type(album: Album, album_type: str) -> None:
