@@ -8,6 +8,7 @@ organizes them into appropriate directory structures.
 import logging
 from typing import Optional
 
+import dynaconf.base
 from prompt_toolkit import Application
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
@@ -18,6 +19,7 @@ from prompt_toolkit.application import get_app
 from prompt_toolkit.styles import Style
 
 import moe
+from moe import config
 from moe.library import Album
 
 __all__ = ["classify_album_type"]
@@ -30,13 +32,31 @@ ALBUM_TYPE_COMPILATION = "compilation"
 ALBUM_TYPE_SOUNDTRACK = "soundtrack"
 ALBUM_TYPE_CLASSICAL = "classical"
 
-# Path templates for different album types
-PATH_TEMPLATES = {
-    ALBUM_TYPE_REGULAR: None,  # Use default config
-    ALBUM_TYPE_COMPILATION: "Compilations/{album.title} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]",
-    ALBUM_TYPE_SOUNDTRACK: "Soundtracks/{album.title} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]",
-    ALBUM_TYPE_CLASSICAL: "Classical/{album.artist}/{album.title} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]",
-}
+
+@moe.hookimpl
+def add_config_validator(settings: dynaconf.base.LazySettings):
+    """Add configuration validators for album_type plugin."""
+    import dynaconf
+
+    # No defaults needed - if not specified, albums use the default album_path
+    settings.validators.register(
+        dynaconf.Validator("ALBUM_TYPE.COMPILATION_ALBUM_PATH", default=None),
+        dynaconf.Validator("ALBUM_TYPE.SOUNDTRACK_ALBUM_PATH", default=None),
+        dynaconf.Validator("ALBUM_TYPE.CLASSICAL_ALBUM_PATH", default=None),
+    )
+
+
+def _get_path_template(album_type: str) -> Optional[str]:
+    """Get the path template for a given album type from config."""
+    if album_type == ALBUM_TYPE_COMPILATION:
+        return config.CONFIG.settings.get("album_type.compilation_album_path")
+    elif album_type == ALBUM_TYPE_SOUNDTRACK:
+        return config.CONFIG.settings.get("album_type.soundtrack_album_path")
+    elif album_type == ALBUM_TYPE_CLASSICAL:
+        return config.CONFIG.settings.get("album_type.classical_album_path")
+    else:
+        # Regular albums and any other types use the default album_path
+        return None
 
 
 @moe.hookimpl
@@ -44,7 +64,9 @@ def override_album_path_config(album: Album) -> Optional[str]:
     """Override album path based on album type classification."""
     # Just use the stored classification - prompting happens in edit_new_items
     album_type = album.custom.get("album_type")
-    return PATH_TEMPLATES.get(album_type)
+    if album_type:
+        return _get_path_template(album_type)
+    return None
 
 
 def _auto_detect_album_type(album: Album) -> Optional[str]:
@@ -265,8 +287,9 @@ def _get_prompt_style():
 
 def classify_album_type(album: Album, album_type: str) -> None:
     """Manually classify an album type (for use by other plugins)."""
-    if album_type not in PATH_TEMPLATES:
-        raise ValueError(f"Invalid album type: {album_type}")
+    valid_types = [ALBUM_TYPE_REGULAR, ALBUM_TYPE_COMPILATION, ALBUM_TYPE_SOUNDTRACK, ALBUM_TYPE_CLASSICAL]
+    if album_type not in valid_types:
+        raise ValueError(f"Invalid album type: {album_type}. Valid types: {valid_types}")
 
     album.custom["album_type"] = album_type
     log.info(f"Manually classified album as '{album_type}': {album.artist} - {album.title}")
