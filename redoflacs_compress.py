@@ -248,22 +248,19 @@ def compress_flac_folder(folder_path: Path) -> None:
                     console.print(
                         f"[green]✓[/green] {flac_file.name}: "
                         f"[blue]{_format_file_size(original_size)}[/blue] -> [blue]{_format_file_size(compressed_size)}[/blue] "
-                        f"([bold green]{savings:.1f}% savings[/bold green])"
+                        f"([bold green]{savings:.2f}% savings[/bold green])"
                     )
 
         # Report overall compression statistics
         if individual_ratios:
             overall_ratio = _calculate_compression_ratio(total_original_size, total_compressed_size)
             overall_savings = 100.0 - overall_ratio
-            average_ratio = sum(individual_ratios) / len(individual_ratios)
-            average_savings = 100.0 - average_ratio
 
             console.print(
                 f"[bold green]🎉 Compression completed for {len(flac_files)} files![/bold green]\n"
                 f"[bold cyan]Overall statistics:[/bold cyan]\n"
                 f"  • Total size: [bold blue]{_format_file_size(total_original_size)}[/bold blue] -> [bold blue]{_format_file_size(total_compressed_size)}[/bold blue]\n"
-                f"  • Overall savings: [bold green]{overall_savings:.1f}%[/bold green]\n"
-                f"  • Average per-file savings: [bold green]{average_savings:.1f}%[/bold green]"
+                f"  • Overall savings: [bold green]{overall_savings:.2f}%[/bold green]\n"
             )
 
         # Mark folder as compressed
