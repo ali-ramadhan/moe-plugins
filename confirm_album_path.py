@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 
 from prompt_toolkit import prompt
+from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import ValidationError, Validator
 from rich.console import Console
 from rich.panel import Panel
@@ -105,10 +106,14 @@ def edit_new_items(session, items):
 
         try:
             new_path = prompt(
-                "Confirm or edit album path: ",
+                [("class:prompt", "Confirm or edit album path: ")],
                 default=current_path_str,
                 validator=PathValidator(),
-                validate_while_typing=False
+                validate_while_typing=False,
+                style=Style.from_dict({
+                    "": "bold #ffff00",  # Bold yellow styling for user input
+                    "prompt": ""  # Regular styling for the prompt text
+                })
             )
 
             new_path = new_path.strip()
