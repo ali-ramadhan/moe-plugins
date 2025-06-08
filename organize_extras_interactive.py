@@ -531,8 +531,8 @@ def _get_extra_destination_path(extra: Extra) -> str:
         return f"{extra.album.title}{ext}"
 
     elif category == CATEGORY_ARTWORK:
-        # Artwork files go into artwork/ directory, keep original name
-        return f"artwork/{extra.path.name}"
+        # Artwork files go into Artwork/ directory, keep original name
+        return f"Artwork/{extra.path.name}"
 
     elif category == CATEGORY_CUE_LOG:
         # CUE/log files use organize_extras.py logic
@@ -553,8 +553,8 @@ def override_extra_path_config(extra: Extra) -> Optional[str]:
         return f"{extra.album.title}{ext}"
 
     elif category == CATEGORY_ARTWORK:
-        # Artwork files go into artwork/ directory, keep original name
-        return f"artwork/{extra.path.name}"
+        # Artwork files go into Artwork/ directory, keep original name
+        return f"Artwork/{extra.path.name}"
 
     elif category == CATEGORY_CUE_LOG:
         # CUE/log files use organize_extras.py logic
