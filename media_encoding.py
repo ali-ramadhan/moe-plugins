@@ -1,4 +1,5 @@
 import moe
+import re
 
 # This plugin returns "pretty" text formatting for the media + encoding, e.g.
 #   [CD FLAC 16bit 44.1kHz]
@@ -10,15 +11,20 @@ import moe
 def create_path_template_func():
     return [media_encoding]
 
-media_subs = {
-    "digital media": "WEB"
-}
+media_regex_subs = [
+    (r"digital\s+media", "WEB"),
+    (r"vinyl", "Vinyl"),
+]
 
 def standardized_album_media(album):
-    if album.media and album.media.lower() in media_subs:
-        return media_subs[album.media.lower()]
-    else:
+    if not album.media:
         return album.media
+
+    for pattern, replacement in media_regex_subs:
+        if re.search(pattern, album.media, re.IGNORECASE):
+            return replacement
+
+    return album.media
 
 def album_audio_format(album):
     audio_formats = [track.audio_format for track in album.tracks]
@@ -52,7 +58,7 @@ def album_sample_rate(album):
     if len(sample_rates) == 1:
         return f"{pretty_sample_rate(sample_rates[0])}kHz"
     else:
-        return "+".join(map(pretty_sample_rate, bit_depths)) + "kHz"
+        return "+".join(map(pretty_sample_rate, sample_rates)) + "kHz"
 
 def media_encoding(album):
     media = standardized_album_media(album)
