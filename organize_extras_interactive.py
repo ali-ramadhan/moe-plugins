@@ -73,6 +73,15 @@ def _should_exclude_by_default(extra: Extra) -> bool:
         return False
 
 
+def _get_safe_display_path(extra: Extra) -> str:
+    """Get display path for an extra, handling cases where it's outside the album directory."""
+    try:
+        return str(extra.rel_path)
+    except ValueError:
+        # Extra is outside album directory (e.g., downloaded cover in temp dir)
+        return extra.path.name
+
+
 def format_file_size(size_bytes: int) -> str:
     """Format file size in human-readable units."""
     if size_bytes < 1024:
@@ -90,9 +99,11 @@ def get_file_info(extra: Extra) -> str:
     try:
         size_bytes = extra.path.stat().st_size
         size_str = format_file_size(size_bytes)
-        return f"{extra.rel_path} ({size_str})"
+        display_path = _get_safe_display_path(extra)
+        return f"{display_path} ({size_str})"
     except (OSError, AttributeError):
-        return str(extra.rel_path)
+        display_path = _get_safe_display_path(extra)
+        return str(display_path)
 
 
 class ExtrasFilterSelector:
@@ -501,7 +512,7 @@ def edit_new_items(session: Session, items):
         extras_to_remove = [extra for extra in extras if extra not in selected_extras]
 
         for extra in extras_to_remove:
-            log.debug(f"Removing extra: {extra.rel_path}")
+            log.debug(f"Removing extra: {_get_safe_display_path(extra)}")
             album.extras.remove(extra)
             extras_to_remove_global.append(extra)
 
@@ -514,15 +525,16 @@ def edit_new_items(session: Session, items):
             for extra in selected_extras:
                 category = extra.custom.get("filter_extras_category")
                 dest_path = _get_extra_destination_path(extra)
+                display_path = _get_safe_display_path(extra)
 
                 if category == CATEGORY_COVER:
-                    print(f"   📸 {extra.rel_path} → {dest_path} (Cover)")
+                    print(f"   📸 {display_path} → {dest_path} (Cover)")
                 elif category == CATEGORY_ARTWORK:
-                    print(f"   🎨 {extra.rel_path} → {dest_path} (Artwork)")
+                    print(f"   🎨 {display_path} → {dest_path} (Artwork)")
                 elif category == CATEGORY_CUE_LOG:
-                    print(f"   💿 {extra.rel_path} → {dest_path} (CUE/Log)")
+                    print(f"   💿 {display_path} → {dest_path} (CUE/Log)")
                 else:
-                    print(f"   ✅ {extra.rel_path} → {dest_path}")
+                    print(f"   ✅ {display_path} → {dest_path}")
         else:
             print("✅ All extra files kept")
 
