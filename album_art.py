@@ -23,6 +23,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.application import get_app
 from prompt_toolkit.styles import Style
+from prompt_toolkit.shortcuts import prompt
 
 import moe
 from moe import config
@@ -365,7 +366,7 @@ def fetch_album_art_with_covit(artist: str, album: str, output_dir: Path) -> Opt
             source = picked_data.get('source', 'unknown')
 
             # Generate filename using covit source and save to temp directory
-            filename = f"cover_covit_{source}.{format_ext}"
+            filename = f"cover_{source}.{format_ext}"
             # Use temporary directory instead of modifying source directory
             temp_dir = Path(tempfile.gettempdir()) / "moe_album_art"
             temp_dir.mkdir(exist_ok=True)
@@ -414,6 +415,114 @@ def fetch_album_art_with_covit(artist: str, album: str, output_dir: Path) -> Opt
 
     except Exception as e:
         print(f"❌ Error in fetch_album_art_with_covit: {e}")
+        return None
+
+
+def download_image_from_url(url: str, output_dir: Path) -> Optional[Path]:
+    """Download an image from a URL and save it to a temporary location."""
+    try:
+        print(f"⬇️  Downloading image from URL...")
+
+        # Download the image
+        with urllib.request.urlopen(url) as response:
+            image_data = response.read()
+
+        # Try to determine format from the image data
+        try:
+            with Image.open(io.BytesIO(image_data)) as img:
+                image_format = img.format.lower() if img.format else 'jpg'
+        except Exception:
+            # Fallback to guessing from URL
+            if url.lower().endswith('.png'):
+                image_format = 'png'
+            elif url.lower().endswith('.gif'):
+                image_format = 'gif'
+            elif url.lower().endswith('.webp'):
+                image_format = 'webp'
+            else:
+                image_format = 'jpg'
+
+        # Generate filename and save to temp directory
+        filename = f"downloaded_cover.{image_format}"
+        temp_dir = Path(tempfile.gettempdir()) / "moe_album_art"
+        temp_dir.mkdir(exist_ok=True)
+        output_path = temp_dir / filename
+
+        with open(output_path, 'wb') as f:
+            f.write(image_data)
+
+        print(f"✅ Downloaded image: {output_path.name}")
+
+        # Display info about the downloaded image
+        try:
+            with Image.open(output_path) as img:
+                width, height = img.size
+                art_info = AlbumArtInfo(
+                    has_art=True,
+                    width=width,
+                    height=height,
+                    format=img.format,
+                    size_bytes=len(image_data)
+                )
+                print_album_art_info(output_path.name, art_info)
+        except Exception as e:
+            art_info = AlbumArtInfo(
+                has_art=True,
+                size_bytes=len(image_data),
+                error=str(e)
+            )
+            print_album_art_info(output_path.name, art_info)
+
+        return output_path
+
+    except Exception as e:
+        print(f"❌ Error downloading image from URL: {e}")
+        return None
+
+
+def validate_local_image_file(file_path_str: str) -> Optional[Path]:
+    """Validate that a local file path exists and is a valid image file."""
+    try:
+        file_path = Path(file_path_str).expanduser().resolve()
+
+        if not file_path.exists():
+            print(f"❌ File does not exist: {file_path}")
+            return None
+
+        if not file_path.is_file():
+            print(f"❌ Path is not a file: {file_path}")
+            return None
+
+        # Check if it's an image file by extension
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'}
+        if file_path.suffix.lower() not in image_extensions:
+            print(f"❌ File does not appear to be an image: {file_path}")
+            return None
+
+        # Try to open it as an image to validate
+        try:
+            with Image.open(file_path) as img:
+                print(f"✅ Valid image file: {file_path.name}")
+
+                # Display info about the image
+                file_size = file_path.stat().st_size
+                art_info = AlbumArtInfo(
+                    has_art=True,
+                    width=img.size[0],
+                    height=img.size[1],
+                    format=img.format,
+                    size_bytes=file_size
+                )
+                print_album_art_info(file_path.name, art_info)
+
+        except Exception as e:
+            print(f"❌ Cannot open as image: {e}")
+            return None
+
+        return file_path
+
+    except Exception as e:
+        print(f"❌ Error validating file path: {e}")
         return None
 
 
@@ -570,6 +679,8 @@ def create_image_choices(image_files: List[Path]) -> List[str]:
             choices.append(f"{image_path.name} (Unable to read)")
 
     choices.append("🌐 Fetch album art online")
+    choices.append("🔗 Enter image URL")
+    choices.append("📁 Enter local file path")
     choices.append("Skip embedding")
     return choices
 
@@ -626,18 +737,18 @@ def prompt_and_embed_album_art(tracks, image_files):
         selected = create_image_selector_with_preview(
             choices,
             image_files,
-            f"Select album art to embed in {len(target_tracks)} track(s):",
-            album_artist=album.artist if album else None,
-            album_title=album.title if album else None,
+            f"Select album art for: {album.artist} - {album.title}",
+            album_artist=album.artist,
+            album_title=album.title,
             output_dir=source_dir
         )
 
         if selected == "Skip embedding" or not selected:
-            print("⏭️  Skipping album art embedding.")
+            print("⏭️  Skipping album art selection.")
             return
 
         if selected == "🌐 Fetch album art online":
-            if album and album.artist and album.title and source_dir:
+            if album and album.artist and album.title:
                 fetched_image = fetch_album_art_with_covit(album.artist, album.title, source_dir)
                 if fetched_image:
                     image_files.append(fetched_image)
@@ -648,6 +759,34 @@ def prompt_and_embed_album_art(tracks, image_files):
             else:
                 print("❌ Cannot fetch album art: Missing album information")
                 continue
+
+        if selected == "🔗 Enter image URL":
+            url = prompt("Please enter the URL of the image you want to download: ")
+
+            if url:
+                downloaded_image = download_image_from_url(url, source_dir)
+                if downloaded_image:
+                    image_files.append(downloaded_image)
+                    choices = create_image_choices(image_files)
+                    continue  # Restart the selection with updated choices
+                else:
+                    continue  # Restart the selection if download failed
+            else:
+                continue  # User cancelled, restart selection
+
+        if selected == "📁 Enter local file path":
+            file_path = prompt("Please enter the path to the image file: ")
+
+            if file_path:
+                validated_file = validate_local_image_file(file_path)
+                if validated_file:
+                    image_files.append(validated_file)
+                    choices = create_image_choices(image_files)
+                    continue  # Restart the selection with updated choices
+                else:
+                    continue  # Restart the selection if validation failed
+            else:
+                continue  # User cancelled, restart selection
 
         # Regular image selection
         try:
@@ -692,6 +831,34 @@ def embed_art_for_files(audio_files: List[Path], image_files: List[Path]):
         if selected == "🌐 Fetch album art online":
             print("❌ Cannot fetch album art: Album information not available for files")
             continue
+
+        if selected == "🔗 Enter image URL":
+            url = prompt("Please enter the URL of the image you want to download: ")
+
+            if url:
+                downloaded_image = download_image_from_url(url, output_dir)
+                if downloaded_image:
+                    image_files.append(downloaded_image)
+                    choices = create_image_choices(image_files)
+                    continue  # Restart the selection with updated choices
+                else:
+                    continue  # Restart the selection if download failed
+            else:
+                continue  # User cancelled, restart selection
+
+        if selected == "📁 Enter local file path":
+            file_path = prompt("Please enter the path to the image file: ")
+
+            if file_path:
+                validated_file = validate_local_image_file(file_path)
+                if validated_file:
+                    image_files.append(validated_file)
+                    choices = create_image_choices(image_files)
+                    continue  # Restart the selection with updated choices
+                else:
+                    continue  # Restart the selection if validation failed
+            else:
+                continue  # User cancelled, restart selection
 
         # Regular image selection
         try:
@@ -1087,6 +1254,34 @@ def pre_add(item):
                 else:
                     print("❌ Cannot fetch album art: Missing album information")
                     continue
+
+            if selected == "🔗 Enter image URL":
+                url = prompt("Please enter the URL of the image you want to download: ")
+
+                if url:
+                    downloaded_image = download_image_from_url(url, source_dir)
+                    if downloaded_image:
+                        image_files.append(downloaded_image)
+                        choices = create_image_choices(image_files)
+                        continue  # Restart the selection with updated choices
+                    else:
+                        continue  # Restart the selection if download failed
+                else:
+                    continue  # User cancelled, restart selection
+
+            if selected == "📁 Enter local file path":
+                file_path = prompt("Please enter the path to the image file: ")
+
+                if file_path:
+                    validated_file = validate_local_image_file(file_path)
+                    if validated_file:
+                        image_files.append(validated_file)
+                        choices = create_image_choices(image_files)
+                        continue  # Restart the selection with updated choices
+                    else:
+                        continue  # Restart the selection if validation failed
+                else:
+                    continue  # User cancelled, restart selection
 
             # Regular image selection
             try:
