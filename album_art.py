@@ -551,7 +551,7 @@ def create_image_selector_with_preview(choices, image_files, prompt_text, album_
             """Generate the formatted text for the current state."""
             lines = [
                 ("class:title", f"{self.prompt_text}\n"),
-                ("class:info", "💡 Use ↑/↓ to navigate, Enter to select, 'v' to preview, 'q' to quit\n\n"),
+                ("class:info", "💡 Use ↑/↓ to navigate, Enter to select, 'v' to preview, 'c' to compress JPEG, 'q' to quit\n\n"),
             ]
 
             for i, choice in enumerate(self.choices):
@@ -585,6 +585,26 @@ def create_image_selector_with_preview(choices, image_files, prompt_text, album_
                 selected_image = self.image_files[self.selected_index]
                 open_image_viewer(selected_image)
 
+        def compress_current(self):
+            """Compress the currently selected JPEG image using ImageMagick."""
+            if self.selected_index >= len(self.image_files):
+                return
+
+            selected_image = self.image_files[self.selected_index]
+
+            # Check if it's a JPEG file
+            if selected_image.suffix.lower() not in ['.jpg', '.jpeg']:
+                return
+
+            # Check if it's a downloaded file (in temp directory)
+            temp_dir = Path(tempfile.gettempdir()) / "moe_album_art"
+            if not str(selected_image).startswith(str(temp_dir)):
+                return
+
+            # Set result to trigger compression and restart
+            self.result = f"🗜️ Compress: {selected_image}"
+            get_app().exit()
+
         def quit(self):
             self.result = self.choices[-1]  # Skip option
             get_app().exit()
@@ -609,6 +629,10 @@ def create_image_selector_with_preview(choices, image_files, prompt_text, album_
     @kb.add('v')
     def preview(event):
         selector.preview_current()
+
+    @kb.add('c')
+    def compress(event):
+        selector.compress_current()
 
     @kb.add('q')
     @kb.add('c-c')  # Ctrl+C
@@ -666,6 +690,63 @@ def create_image_choices(image_files: List[Path]) -> List[str]:
     return choices
 
 
+def compress_jpeg_image(image_path: Path) -> bool:
+    """Compress a JPEG image using ImageMagick."""
+    # Check if ImageMagick is available
+    try:
+        subprocess.run(["convert", "-version"], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print(f"\n❌ ImageMagick 'convert' command not found. Please install ImageMagick to compress images.")
+        return False
+
+    # Get original file size
+    original_size = image_path.stat().st_size
+
+    # Create compressed version
+    compressed_path = image_path.with_suffix('.compressed.jpg')
+
+    try:
+        # Use ImageMagick to compress the JPEG to quality 90
+        subprocess.run([
+            "convert",
+            str(image_path),
+            "-quality", "90",
+            str(compressed_path)
+        ], check=True, capture_output=True)
+
+        # Get compressed file size
+        compressed_size = compressed_path.stat().st_size
+
+        # Only replace if compression actually made it smaller
+        if compressed_size < original_size:
+            # Replace the original file with compressed version
+            compressed_path.replace(image_path)
+
+            # Calculate compression ratio
+            ratio = (original_size - compressed_size) / original_size * 100
+
+            print(f"\n✅ Compressed {image_path.name}: {format_file_size(original_size)} → {format_file_size(compressed_size)} (-{ratio:.1f}%)")
+            return True
+        else:
+            # Remove compressed version if it's not smaller
+            compressed_path.unlink()
+            print(f"\n⚠️  Compression didn't reduce file size for {image_path.name}")
+            return False
+
+    except subprocess.CalledProcessError as e:
+        print(f"\n❌ Error compressing image: {e}")
+        # Clean up if compression failed
+        if compressed_path.exists():
+            compressed_path.unlink()
+        return False
+    except Exception as e:
+        print(f"\n❌ Unexpected error during compression: {e}")
+        # Clean up if compression failed
+        if compressed_path.exists():
+            compressed_path.unlink()
+        return False
+
+
 def handle_interactive_image_selection(choices, image_files, prompt_text, album_artist=None, album_title=None, output_dir=None, allow_covit=True):
     """Handle the interactive image selection loop with online fetching, URL download, and file path validation."""
     while True:
@@ -681,6 +762,30 @@ def handle_interactive_image_selection(choices, image_files, prompt_text, album_
         if selected == "Skip embedding" or not selected:
             print("⏭️  Skipping album art selection.")
             return None
+
+        if selected.startswith("🗜️ Compress: "):
+            # Extract the image path from the result
+            image_path_str = selected[len("🗜️ Compress: "):]
+            image_path = Path(image_path_str)
+
+            # Check if it's a JPEG file
+            if image_path.suffix.lower() not in ['.jpg', '.jpeg']:
+                print(f"\n⚠️  Cannot compress {image_path.name}: Only JPEG files can be compressed")
+                continue
+
+            # Check if it's a downloaded file (in temp directory)
+            temp_dir = Path(tempfile.gettempdir()) / "moe_album_art"
+            if not str(image_path).startswith(str(temp_dir)):
+                print(f"\n⚠️  Cannot compress {image_path.name}: Only downloaded covers can be compressed")
+                continue
+
+            # Perform compression
+            if compress_jpeg_image(image_path):
+                # Recreate choices with updated file size
+                choices = create_image_choices(image_files)
+                continue  # Restart the selection with updated choices
+            else:
+                continue  # Restart the selection if compression failed
 
         if selected == "🌐 Fetch album art online":
             if allow_covit and album_artist and album_title:
@@ -1189,7 +1294,7 @@ def pre_add(item):
         print(f"✅ Selected album art: {selected_image.name}")
 
 
-@moe.hookimpl
+@moe.hookimpl(tryfirst=True)
 def edit_new_items(session: Session, items):
     """Create album art Extra files before organize_extras runs."""
     albums_to_process = []
