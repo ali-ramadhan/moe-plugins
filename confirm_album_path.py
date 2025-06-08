@@ -112,15 +112,15 @@ def edit_new_items(session, items):
                 validate_while_typing=False,
                 style=Style.from_dict({
                     "": "bold #ffff00",  # Bold yellow styling for user input
-                    "prompt": ""  # Regular styling for the prompt text
+                    "prompt": "#ffffff"  # Normal white styling for the prompt text
                 })
             )
 
             new_path = new_path.strip()
             if new_path != current_path_str:
                 log.info(f"Album path changed: '{current_path_str}' -> '{new_path}'")
-                # Update the album's path to the new destination
-                album.path = Path(new_path)
+                # Store the custom path for later retrieval by override_album_path_config
+                album.custom['_confirm_album_path_override'] = new_path
                 console.print("✅ Path updated to:", style="bold green", end=" ")
                 console.print(new_path, style="bright_white")
             else:
@@ -135,3 +135,33 @@ def edit_new_items(session, items):
             log.error(f"Error during path confirmation: {e}")
             console.print(f"\n❌ Error: {e}", style="bold red")
             raise
+
+
+@moe.hookimpl
+def override_album_path_config(album):
+    """Override the album path config with user-confirmed path."""
+    custom_path = album.custom.get('_confirm_album_path_override')
+    if custom_path:
+        # Convert absolute path to a relative template
+        library_path = Path(config.CONFIG.settings.library_path).expanduser()
+        custom_path_obj = Path(custom_path)
+
+        try:
+            # If the custom path is absolute and under library_path, make it relative
+            if custom_path_obj.is_absolute():
+                relative_path = custom_path_obj.relative_to(library_path)
+                # Escape braces to treat them as literal text, not f-string expressions
+                escaped_path = str(relative_path).replace('{', '{{').replace('}', '}}')
+                return escaped_path
+            else:
+                # If it's already relative, escape braces and use it as-is
+                escaped_path = custom_path.replace('{', '{{').replace('}', '}}')
+                return escaped_path
+        except ValueError:
+            # If the path is not under library_path, use it as an absolute template
+            log.warning(f"Custom path is outside library path: {custom_path}")
+            # Escape braces even for absolute paths
+            escaped_path = custom_path.replace('{', '{{').replace('}', '}}')
+            return escaped_path
+
+    return None  # Use default config
