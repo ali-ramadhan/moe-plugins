@@ -10,6 +10,7 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import Any, Set
+import re
 
 import dynaconf
 import moe
@@ -175,11 +176,21 @@ def _get_album_root_folder(track_path: Path) -> Path:
 
     # Check if parent folder name suggests it's a disc folder
     parent_name = parent.name.lower()
-    disc_patterns = ['disc', 'disk', 'cd']
 
-    # If parent folder name contains disc/disk/cd patterns, assume it's a disc folder
+    # More specific patterns that indicate actual disc folders
+    # Look for patterns like "disc 1", "disc1", "disk 1", "disk1", "cd 1", "cd1", etc.
+    disc_patterns = [
+        r'\bdisc\s*\d+\b',  # "disc 1", "disc1", "disc 01", etc.
+        r'\bdisk\s*\d+\b',  # "disk 1", "disk1", "disk 01", etc.
+        r'\bcd\s*\d+\b',    # "cd 1", "cd1", "cd 01", etc.
+        r'\bdisc\s*[ivx]+\b',  # "disc i", "disc ii", "disc iii", etc. (roman numerals)
+        r'\bdisk\s*[ivx]+\b',  # "disk i", "disk ii", "disk iii", etc.
+        r'\bcd\s*[ivx]+\b',    # "cd i", "cd ii", "cd iii", etc.
+    ]
+
+    # If parent folder name matches disc folder patterns, assume it's a disc folder
     # and the album root is the grandparent
-    if any(pattern in parent_name for pattern in disc_patterns):
+    if any(re.search(pattern, parent_name) for pattern in disc_patterns):
         if parent.parent.exists() and parent.parent != parent:
             return parent.parent
 
