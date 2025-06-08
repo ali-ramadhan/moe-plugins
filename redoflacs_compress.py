@@ -176,6 +176,34 @@ def _build_redoflacs_command(folder_path: Path) -> list[str]:
     return cmd
 
 
+def _get_album_root_folder(track_path: Path) -> Path:
+    """Get the album root folder for a track, handling multi-disc albums.
+
+    For single-disc albums, returns the parent folder.
+    For multi-disc albums, returns the grandparent folder if the parent looks like a disc folder.
+
+    Args:
+        track_path: Path to the FLAC track file.
+
+    Returns:
+        Path to the album root folder.
+    """
+    parent = track_path.parent
+
+    # Check if parent folder name suggests it's a disc folder
+    parent_name = parent.name.lower()
+    disc_patterns = ['disc', 'disk', 'cd']
+
+    # If parent folder name contains disc/disk/cd patterns, assume it's a disc folder
+    # and the album root is the grandparent
+    if any(pattern in parent_name for pattern in disc_patterns):
+        if parent.parent.exists() and parent.parent != parent:
+            return parent.parent
+
+    # Otherwise, treat parent as the album root
+    return parent
+
+
 @moe.hookimpl
 def compress_flac_folder(folder_path: Path) -> None:
     """Compress all FLAC files in a folder using redoflacs.
@@ -304,8 +332,9 @@ def process_new_items(session: Session, items):
                     albums_to_compress.add(item.path)
                     break
         elif isinstance(item, Track) and item.path.suffix.lower() == '.flac':
-            # Individual track - compress its album folder
-            albums_to_compress.add(item.path.parent)
+            # Individual track - get the album root folder (handles multi-disc albums)
+            album_folder = _get_album_root_folder(item.path)
+            albums_to_compress.add(album_folder)
 
     # Compress each unique album folder
     for album_path in albums_to_compress:
