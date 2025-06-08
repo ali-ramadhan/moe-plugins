@@ -88,14 +88,8 @@ def _auto_detect_album_type(album: Album) -> Optional[str]:
         "requiem", "mass", "cantata", "oratorio", "fugue", "prelude",
         "nocturne", "etude", "waltz", "polonaise", "mazurka"
     ]
-    classical_composers = [
-        "bach", "mozart", "beethoven", "chopin", "tchaikovsky", "vivaldi",
-        "brahms", "schubert", "debussy", "stravinsky", "rachmaninoff",
-        "handel", "haydn", "liszt", "wagner", "mahler", "dvorak"
-    ]
 
-    if (any(keyword in title_lower for keyword in classical_keywords) or
-        any(composer in artist_lower for composer in classical_composers)):
+    if any(keyword in title_lower for keyword in classical_keywords):
         return ALBUM_TYPE_CLASSICAL
 
     # Check for compilation indicators
