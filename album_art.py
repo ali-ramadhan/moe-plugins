@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import List, Optional
 
 import dynaconf
-import questionary
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import APIC, ID3, ID3NoHeaderError
 from PIL import Image
@@ -23,6 +22,7 @@ from prompt_toolkit.layout.containers import HSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.application import get_app
+from prompt_toolkit.styles import Style
 
 import moe
 from moe import config
@@ -538,23 +538,11 @@ def create_image_selector_with_preview(choices, image_files, prompt_text, album_
         ])
     )
 
-    # Custom style
-    from prompt_toolkit.styles import Style
-
-    style = Style.from_dict({
-        'title': '#ansiblue bold',
-        'info': '#ansiyellow',
-        'selected': '#ansigreen bold',
-        'selected_fetch': '#ansicyan bold',
-        'selected_skip': '#ansired bold',
-        'normal': '',
-    })
-
     # Create and run the application
     app = Application(
         layout=layout,
         key_bindings=kb,
-        style=style,
+        style=get_prompt_style(),
         full_screen=False,
         mouse_support=False,
     )
@@ -602,22 +590,22 @@ def prompt_and_embed_album_art(tracks, image_files):
             tracks_without_art.append(track)
 
     if tracks_with_art and not tracks_without_art:
-        choice = questionary.confirm(
+        choice = create_confirm_dialog(
             f"All {len(tracks)} tracks already have embedded album art. Replace it?"
-        ).ask()
+        )
         if not choice:
             print("⏭️  Skipping album art embedding.")
             return
         target_tracks = tracks
     elif tracks_with_art:
-        choice = questionary.select(
+        choice = create_select_dialog(
             f"{len(tracks_with_art)} tracks have art, {len(tracks_without_art)} don't. What to do?",
             choices=[
                 "Embed in tracks without art only",
                 "Replace art in all tracks",
                 "Skip embedding"
             ]
-        ).ask()
+        )
 
         if choice == "Skip embedding":
             print("⏭️  Skipping album art embedding.")
@@ -816,12 +804,212 @@ def analyze_directory_album_art(directory: Path, recursive: bool = False, embed:
         if embed and tracks_without_art:
             image_files = scan_directory_for_images(dir_path)
             if image_files:
-                choice = questionary.confirm(
+                choice = create_confirm_dialog(
                     f"\nEmbed album art for {len(tracks_without_art)} file(s) in {dir_path.name}?"
-                ).ask()
+                )
 
                 if choice:
                     embed_art_for_files(tracks_without_art, image_files)
+
+
+# =============================================================================
+# PROMPT TOOLKIT COMPONENTS - Reusable UI components
+# =============================================================================
+
+def create_confirm_dialog(message: str, default: bool = True) -> bool:
+    """Create a confirm dialog using prompt_toolkit."""
+
+    class ConfirmDialog:
+        def __init__(self, message: str, default: bool = True):
+            self.message = message
+            self.default = default
+            self.result = default
+
+        def get_formatted_text(self):
+            """Generate the formatted text for the confirm dialog."""
+            default_text = "Y/n" if self.default else "y/N"
+            return FormattedText([
+                ("class:question", f"{self.message} ({default_text}): "),
+                ("class:answer", "Yes" if self.result else "No"),
+                ("class:info", "\n💡 Use ←/→ to toggle, Enter to confirm, 'q' to quit")
+            ])
+
+        def toggle(self):
+            self.result = not self.result
+
+        def confirm(self):
+            get_app().exit()
+
+        def quit(self):
+            self.result = False
+            get_app().exit()
+
+    dialog = ConfirmDialog(message, default)
+
+    # Create key bindings
+    kb = KeyBindings()
+
+    @kb.add('left')
+    @kb.add('right')
+    @kb.add(' ')  # Space bar
+    def toggle(event):
+        dialog.toggle()
+
+    @kb.add('enter')
+    def confirm(event):
+        dialog.confirm()
+
+    @kb.add('y')
+    def yes(event):
+        dialog.result = True
+        dialog.confirm()
+
+    @kb.add('n')
+    def no(event):
+        dialog.result = False
+        dialog.confirm()
+
+    @kb.add('q')
+    @kb.add('c-c')  # Ctrl+C
+    def quit(event):
+        dialog.quit()
+
+    # Create the layout
+    def get_content():
+        return dialog.get_formatted_text()
+
+    layout = Layout(
+        HSplit([
+            Window(
+                content=FormattedTextControl(get_content),
+                wrap_lines=True,
+            )
+        ])
+    )
+
+    # Create and run the application
+    app = Application(
+        layout=layout,
+        key_bindings=kb,
+        style=get_prompt_style(),
+        full_screen=False,
+        mouse_support=False,
+    )
+
+    try:
+        app.run()
+        return dialog.result
+    except (KeyboardInterrupt, EOFError):
+        return False
+
+
+def create_select_dialog(message: str, choices: List[str]) -> Optional[str]:
+    """Create a select dialog using prompt_toolkit."""
+
+    class SelectDialog:
+        def __init__(self, message: str, choices: List[str]):
+            self.message = message
+            self.choices = choices
+            self.selected_index = 0
+            self.result = None
+
+        def get_formatted_text(self):
+            """Generate the formatted text for the select dialog."""
+            lines = [
+                ("class:question", f"{self.message}\n"),
+                ("class:info", "💡 Use ↑/↓ to navigate, Enter to select, 'q' to quit\n\n"),
+            ]
+
+            for i, choice in enumerate(self.choices):
+                if i == self.selected_index:
+                    lines.append(("class:selected", f"❯ {choice}\n"))
+                else:
+                    lines.append(("class:normal", f"  {choice}\n"))
+
+            return FormattedText(lines)
+
+        def move_up(self):
+            if self.selected_index > 0:
+                self.selected_index -= 1
+
+        def move_down(self):
+            if self.selected_index < len(self.choices) - 1:
+                self.selected_index += 1
+
+        def select_current(self):
+            self.result = self.choices[self.selected_index]
+            get_app().exit()
+
+        def quit(self):
+            self.result = None
+            get_app().exit()
+
+    if not choices:
+        return None
+
+    dialog = SelectDialog(message, choices)
+
+    # Create key bindings
+    kb = KeyBindings()
+
+    @kb.add('up')
+    def move_up(event):
+        dialog.move_up()
+
+    @kb.add('down')
+    def move_down(event):
+        dialog.move_down()
+
+    @kb.add('enter')
+    def select(event):
+        dialog.select_current()
+
+    @kb.add('q')
+    @kb.add('c-c')  # Ctrl+C
+    def quit(event):
+        dialog.quit()
+
+    # Create the layout
+    def get_content():
+        return dialog.get_formatted_text()
+
+    layout = Layout(
+        HSplit([
+            Window(
+                content=FormattedTextControl(get_content),
+                wrap_lines=True,
+            )
+        ])
+    )
+
+    # Create and run the application
+    app = Application(
+        layout=layout,
+        key_bindings=kb,
+        style=get_prompt_style(),
+        full_screen=False,
+        mouse_support=False,
+    )
+
+    try:
+        app.run()
+        return dialog.result
+    except (KeyboardInterrupt, EOFError):
+        return None
+
+
+def get_prompt_style():
+    """Get the shared style for all prompt_toolkit components."""
+    return Style.from_dict({
+        'title': '#ansiblue bold',
+        'question': '#ansiblue bold',
+        'info': '#ansiyellow',
+        'answer': '#ansigreen bold',
+        'selected': '#ansigreen bold',
+        'selected_fetch': '#ansicyan bold',
+        'selected_skip': '#ansired bold',
+        'normal': '',
+    })
 
 
 # =============================================================================
