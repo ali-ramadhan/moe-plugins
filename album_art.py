@@ -551,7 +551,7 @@ def create_image_selector_with_preview(choices, image_files, prompt_text, album_
             """Generate the formatted text for the current state."""
             lines = [
                 ("class:title", f"{self.prompt_text}\n"),
-                ("class:info", "💡 Use ↑/↓ to navigate, Enter to select, 'v' to preview, 'c' to compress JPEG, 'q' to quit\n\n"),
+                ("class:info", "💡 Use ↑/↓ to navigate, Enter to select, 'o' to open/preview, 'c' to compress JPEG, 'q' to quit\n\n"),
             ]
 
             for i, choice in enumerate(self.choices):
@@ -626,7 +626,7 @@ def create_image_selector_with_preview(choices, image_files, prompt_text, album_
     def select(event):
         selector.select_current()
 
-    @kb.add('v')
+    @kb.add('o')
     def preview(event):
         selector.preview_current()
 
