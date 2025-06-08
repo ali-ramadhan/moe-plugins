@@ -277,12 +277,9 @@ def edit_new_items(session: Session, items):
 
     # Process each album's extras
     for album_obj_id, extras in albums_with_extras.items():
-        if len(extras) <= 1:
-            # Skip filtering if there's only one or no extras
-            continue
-
+        # Always show the filtering interface, regardless of extra count
         album = album_id_to_album[album_obj_id]
-        print(f"\n📁 Found {len(extras)} extra files for: {album.artist} - {album.title}")
+        print(f"\n📁 Found {len(extras)} extra file{'s' if len(extras) != 1 else ''} for: {album.artist} - {album.title}")
 
         # Show the interactive filter interface
         selected_extras = create_extras_filter_interface(extras, album)
@@ -298,7 +295,7 @@ def edit_new_items(session: Session, items):
         if extras_to_remove:
             removed_count = len(extras_to_remove)
             kept_count = len(selected_extras)
-            print(f"✅ Kept {kept_count} extra files, removed {removed_count} extra files")
+            print(f"✅ Kept {kept_count} extra file{'s' if kept_count != 1 else ''}, removed {removed_count} extra file{'s' if removed_count != 1 else ''}")
 
             # Show which files were kept
             for extra in selected_extras:
