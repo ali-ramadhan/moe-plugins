@@ -127,6 +127,8 @@ class ExtrasFilterSelector:
 
     def _apply_default_rules(self):
         """Apply default selection and categorization rules."""
+        potential_cover_index = None
+
         for i, extra in enumerate(self.extras):
             # Auto-detect and categorize CUE/log files
             if _is_cue_log_file(extra):
@@ -137,8 +139,24 @@ class ExtrasFilterSelector:
                 # Don't add to selected_extras (excluded by default)
                 pass
             else:
-                # All other files are selected by default
+                # All other files are selected by default and need categorization
                 self.selected_extras.add(i)
+                # Keep track of potential cover files (image files)
+                if potential_cover_index is None and self._is_image_file(extra):
+                    potential_cover_index = i
+                # Auto-categorize as artwork if not already categorized
+                if i not in self.categories:
+                    self.categories[i] = CATEGORY_ARTWORK
+
+        # Auto-assign the first image file as cover if we found one
+        if potential_cover_index is not None:
+            self.cover_index = potential_cover_index
+            self.categories[potential_cover_index] = CATEGORY_COVER
+
+    def _is_image_file(self, extra: Extra) -> bool:
+        """Check if a file is an image based on extension."""
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
+        return extra.path.suffix.lower() in image_extensions
 
     def get_formatted_text(self):
         """Generate the formatted text for the current state."""
@@ -154,11 +172,13 @@ class ExtrasFilterSelector:
         if text_editor:
             help_text = "💡 Use ↑/↓ to navigate, Space to toggle, Enter to confirm\n" \
                        "   'c' = set as cover, 'a' = set as artwork, 'u' = set as cue/log\n" \
-                       "   'r' = remove category, 'o' = open file, 't' = text editor, 'q' = quit\n\n"
+                       "   'r' = remove category, 'o' = open file, 't' = text editor, 'q' = quit\n" \
+                       "   Note: All selected files must be categorized and exactly 1 cover required!\n\n"
         else:
             help_text = "💡 Use ↑/↓ to navigate, Space to toggle, Enter to confirm\n" \
                        "   'c' = set as cover, 'a' = set as artwork, 'u' = set as cue/log\n" \
-                       "   'r' = remove category, 'o' = open file, 'q' = quit\n\n"
+                       "   'r' = remove category, 'o' = open file, 'q' = quit\n" \
+                       "   Note: All selected files must be categorized and exactly 1 cover required!\n\n"
 
         lines = [
             ("class:title", f"Filter and categorize extra files for: {artist} - {title}\n"),
@@ -178,13 +198,23 @@ class ExtrasFilterSelector:
                     category_indicator = " (🎨 Artwork)"
                 elif self.categories[i] == CATEGORY_CUE_LOG:
                     category_indicator = " (💿 CUE/Log)"
+            elif i in self.selected_extras:
+                # Selected but uncategorized - show warning
+                category_indicator = " ⚠️ (Needs category!)"
 
             display_text = f"{checkbox} {file_info}{category_indicator}"
 
+            # Determine the style based on selection and current position
             if i == self.current_index:
-                lines.append(("class:selected", f"❯ {display_text}\n"))
+                if i in self.selected_extras:
+                    lines.append(("class:selected", f"❯ {display_text}\n"))
+                else:
+                    lines.append(("class:selected_dimmed", f"❯ {display_text}\n"))
             else:
-                lines.append(("class:normal", f"  {display_text}\n"))
+                if i in self.selected_extras:
+                    lines.append(("class:normal", f"  {display_text}\n"))
+                else:
+                    lines.append(("class:dimmed", f"  {display_text}\n"))
 
         selected_count = len(self.selected_extras)
         total_count = len(self.extras)
@@ -194,8 +224,23 @@ class ExtrasFilterSelector:
         artwork_count = sum(1 for cat in self.categories.values() if cat == CATEGORY_ARTWORK)
         cue_log_count = sum(1 for cat in self.categories.values() if cat == CATEGORY_CUE_LOG)
 
+        # Count uncategorized selected files
+        uncategorized_count = len([i for i in self.selected_extras if i not in self.categories])
+
         lines.append(("class:summary", f"\nSelected: {selected_count}/{total_count} files\n"))
         lines.append(("class:summary", f"Categorized: Cover({cover_count}), Artwork({artwork_count}), CUE/Log({cue_log_count})\n"))
+
+        # Show validation warnings
+        warnings = []
+        if uncategorized_count > 0:
+            warnings.append(f"{uncategorized_count} selected file(s) need categorization")
+        if cover_count == 0:
+            warnings.append("exactly 1 cover file must be selected")
+        elif cover_count > 1:  # This shouldn't happen with current logic, but just in case
+            warnings.append("only 1 cover file allowed")
+
+        if warnings:
+            lines.append(("class:warning", f"⚠️  {', '.join(warnings).capitalize()}!\n"))
 
         return FormattedText(lines)
 
@@ -209,15 +254,31 @@ class ExtrasFilterSelector:
 
     def toggle_current(self):
         if self.current_index in self.selected_extras:
+            # Deselecting - remove from selected and categories
             self.selected_extras.remove(self.current_index)
+            if self.current_index in self.categories:
+                if self.cover_index == self.current_index:
+                    self.cover_index = None
+                del self.categories[self.current_index]
         else:
+            # Selecting - add to selected and require categorization
             self.selected_extras.add(self.current_index)
+            # Auto-assign as artwork if not already categorized
+            if self.current_index not in self.categories:
+                self.categories[self.current_index] = CATEGORY_ARTWORK
 
     def select_all(self):
         self.selected_extras = set(range(len(self.extras)))
+        # Ensure all selected files have categories
+        for i in self.selected_extras:
+            if i not in self.categories:
+                self.categories[i] = CATEGORY_ARTWORK
 
     def select_none(self):
         self.selected_extras.clear()
+        # Clear all categories since nothing is selected
+        self.categories.clear()
+        self.cover_index = None
 
     def set_as_cover(self):
         """Set the current file as the cover (only one allowed)."""
@@ -256,11 +317,13 @@ class ExtrasFilterSelector:
             self.selected_extras.add(self.current_index)
 
     def remove_category(self):
-        """Remove category from the current file."""
+        """Remove category from the current file and deselect it."""
         if self.current_index in self.categories:
             if self.cover_index == self.current_index:
                 self.cover_index = None
             del self.categories[self.current_index]
+            # Also deselect the file since it no longer has a category
+            self.selected_extras.discard(self.current_index)
 
     def open_current_file(self):
         """Open the currently selected file using xdg-open."""
@@ -302,7 +365,17 @@ class ExtrasFilterSelector:
             else:
                 log.warning("No text editor configured in moe config")
 
+    def can_confirm(self):
+        """Check if the current state allows confirmation (all selected files are categorized and exactly one cover)."""
+        all_categorized = all(i in self.categories for i in self.selected_extras)
+        has_exactly_one_cover = self.cover_index is not None and self.cover_index in self.selected_extras
+        return all_categorized and has_exactly_one_cover
+
     def confirm_selection(self):
+        # Validate that all selected files are categorized
+        if not self.can_confirm():
+            return  # Don't exit if validation fails
+
         # Store categorization info in extras' custom fields
         for i, extra in enumerate(self.extras):
             if i in self.categories:
@@ -374,7 +447,12 @@ def create_extras_filter_interface(extras: List[Extra], album: Album) -> List[Ex
 
     @kb.add('enter')
     def confirm(event):
-        selector.confirm_selection()
+        if selector.can_confirm():
+            selector.confirm_selection()
+        else:
+            # Flash a message or beep to indicate that confirmation is blocked
+            # For now, we'll just do nothing and let the user see the warning in the display
+            pass
 
     @kb.add('q')
     @kb.add('c-c')  # Ctrl+C
@@ -399,8 +477,11 @@ def create_extras_filter_interface(extras: List[Extra], album: Album) -> List[Ex
         'title': '#ansiblue bold',
         'info': '#ansiyellow',
         'selected': '#ansigreen bold',
+        'selected_dimmed': '#888888 bold',  # Gray but bold for current item when deselected
         'normal': '',
+        'dimmed': '#888888',  # Gray for deselected items
         'summary': '#ansicyan',
+        'warning': '#ansired bold',  # Red for warnings
     })
 
     # Create and run the application
