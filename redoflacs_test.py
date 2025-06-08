@@ -159,6 +159,34 @@ def validate_flac_folder(folder_path: Path) -> None:
         raise TestFlacError(error_msg)
 
 
+def _get_album_root_folder(track_path: Path) -> Path:
+    """Get the album root folder for a track, handling multi-disc albums.
+
+    For single-disc albums, returns the parent folder.
+    For multi-disc albums, returns the grandparent folder if the parent looks like a disc folder.
+
+    Args:
+        track_path: Path to the FLAC track file.
+
+    Returns:
+        Path to the album root folder.
+    """
+    parent = track_path.parent
+
+    # Check if parent folder name suggests it's a disc folder
+    parent_name = parent.name.lower()
+    disc_patterns = ['disc', 'disk', 'cd']
+
+    # If parent folder name contains disc/disk/cd patterns, assume it's a disc folder
+    # and the album root is the grandparent
+    if any(pattern in parent_name for pattern in disc_patterns):
+        if parent.parent.exists() and parent.parent != parent:
+            return parent.parent
+
+    # Otherwise, treat parent as the album root
+    return parent
+
+
 @moe.hookimpl(tryfirst=True)
 def read_custom_tags(
     track_path: Path, album_fields: dict[str, Any], track_fields: dict[str, Any]
@@ -178,9 +206,9 @@ def read_custom_tags(
     """
     # Only validate if this is a FLAC file
     if track_path.suffix.lower() == '.flac':
-        # Validate the parent folder containing the FLAC file
-        folder_path = track_path.parent
-        validate_flac_folder(folder_path)
+        # Get the album root folder (handles multi-disc albums)
+        album_folder = _get_album_root_folder(track_path)
+        validate_flac_folder(album_folder)
 
 
 @moe.hookimpl
@@ -198,4 +226,5 @@ def pre_add(item):
     if isinstance(item, Album):
         validate_flac_folder(item.path)
     elif isinstance(item, Track) and item.path.suffix.lower() == '.flac':
-        validate_flac_folder(item.path.parent)
+        album_folder = _get_album_root_folder(item.path)
+        validate_flac_folder(album_folder)
