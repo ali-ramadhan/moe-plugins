@@ -21,6 +21,8 @@ enable_plugins = [
     "album_art",
     "redoflacs_test",
     "redoflacs_compress",
+
+    "confirm_album_path",
 ]
 
 library_path = "/home/alir/music-tagging-moe/library-tagged"
