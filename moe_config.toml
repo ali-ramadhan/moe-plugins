@@ -42,8 +42,8 @@ track_path = "{disc_dir_padded(track, album)}/{track.track_num:02d}. {track.titl
 extra_path = "{organize_extras(extra)}"
 
 [album_type]
-compilation_album_path = "Compilations/{album.title} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
-soundtrack_album_path = "Soundtracks/{album.title} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
+compilation_album_path = "Compilations/{bucket(the(album.title))}/{the(album.title)} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
+soundtrack_album_path = "Soundtracks/{bucket(the(album.title))}/{the(album.title)} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
 classical_album_path = "Classical/{album.artist}/{album.title} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
 
 [filter_extras]
