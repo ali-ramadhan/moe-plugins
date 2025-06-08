@@ -14,8 +14,7 @@ enable_plugins = [
     "the",
     "year_reissue",
 
-    "organize_extras",
-    "filter_extras",
+    "organize_extras_interactive",
 
     "album_type",
     "album_art",
@@ -38,9 +37,6 @@ album_path = "{bucket(the(album.artist))}/{the(album.artist)}/{album.artist} - {
 # Track filesystem path format relative to album_path.
 track_path = "{disc_dir_padded(track, album)}/{track.track_num:02d}. {track.title}{track.path.suffix}"
 
-# Extra filesystem path format relative to album_path.
-extra_path = "{organize_extras(extra)}"
-
 [album_type]
 compilation_album_path = "Compilations/{bucket(the(album.title))}/{the(album.title)} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
 soundtrack_album_path = "Soundtracks/{bucket(the(album.title))}/{the(album.title)} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
@@ -48,6 +44,7 @@ classical_album_path = "Classical/{album.artist}/{album.title} ({year_reissue(al
 
 [filter_extras]
 text_editor = "kate"
+exclude_by_default = ["m3u"]
 
 [album_art]
 image_viewer = "qimgv {image_path}"
