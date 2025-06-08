@@ -665,7 +665,6 @@ def prompt_and_embed_album_art(tracks, image_files):
     for track in target_tracks:
         if embed_album_art_in_file(track.path, selected_image):
             success_count += 1
-            print(f"✅ {track.path.name}")
         else:
             print(f"❌ {track.path.name}")
 
@@ -1192,7 +1191,6 @@ def process_new_items(session: Session, items):
             for track in tracks:
                 if embed_album_art_in_file(track.path, art_extra.path):
                     success_count += 1
-                    print(f"✅ {track.path.name}")
                 else:
                     print(f"❌ {track.path.name}")
 
