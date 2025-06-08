@@ -558,7 +558,7 @@ def create_image_selector_with_preview(choices, image_files, prompt_text, album_
                 if i == self.selected_index:
                     if i < len(self.image_files):
                         lines.append(("class:selected", f"❯ {choice}\n"))
-                    elif choice == "🌐 Fetch album art online":
+                    elif choice in ["🌐 Fetch album art online", "🔗 Enter image URL", "📁 Enter local file path"]:
                         lines.append(("class:selected_fetch", f"❯ {choice}\n"))
                     else:
                         lines.append(("class:selected_skip", f"❯ {choice}\n"))
