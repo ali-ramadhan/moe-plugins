@@ -128,6 +128,7 @@ def get_candidates(album: Album) -> list[CandidateAlbum]:
 
         log.debug(f"Searching Discogs for: {query}")
 
+        print(f"Searching Discogs for: {query}")
         results = client.search(query, type="release")
         results.per_page = search_limit
         releases = results.page(1)
@@ -217,6 +218,7 @@ def get_album_by_id(release_id: str) -> MetaAlbum:
         release = discogs_client.Release(client, {"id": int(release_id)})
 
         # Force fetch the release data
+        print(f"Fetching Discogs release ID: {release_id}")
         release.refresh()
 
         log.info(f"Fetched release from Discogs. [release={release_id!r}]")
@@ -315,6 +317,49 @@ def _safe_has(obj, key: str) -> bool:
     return hasattr(obj, key)
 
 
+def _get_release_date(release) -> Optional[datetime.date]:
+    """Gets the release date from a Discogs release.
+
+    Args:
+        release: Discogs release object.
+
+    Returns:
+        Release date if available, otherwise original date.
+    """
+    # Use the specific release year
+    if hasattr(release, 'year') and release.year:
+        return datetime.date(release.year, 1, 1)
+
+    # Fall back to original date if no specific release year
+    return _get_original_date(release)
+
+
+def _get_original_date(release) -> Optional[datetime.date]:
+    """Gets the original release date from a Discogs release's master.
+
+    Args:
+        release: Discogs release object.
+
+    Returns:
+        Original release date if available from master release.
+    """
+    # Try to get the master release year
+    if hasattr(release, 'master') and release.master:
+        try:
+            master = release.master
+            if hasattr(master, 'year') and master.year:
+                return datetime.date(master.year, 1, 1)
+        except Exception:
+            # If we can't access the master, continue
+            pass
+
+    # If no master or master year, use the release year as original
+    if hasattr(release, 'year') and release.year:
+        return datetime.date(release.year, 1, 1)
+
+    return None
+
+
 def _create_album(release) -> MetaAlbum:
     """Creates a MetaAlbum from a Discogs release."""
     log.debug(f"Creating album from Discogs release. [release={release.id!r}]")
@@ -325,9 +370,9 @@ def _create_album(release) -> MetaAlbum:
     # Get artist info
     artist = _get_artist_name(release.artists)
 
-    # Get year
-    year = release.year if hasattr(release, 'year') and release.year else None
-    date = datetime.date(year, 1, 1) if year else None
+    # Get release date and original date (like MusicBrainz plugin)
+    release_date = _get_release_date(release)
+    original_date = _get_original_date(release)
 
     # Get label and catalog info
     label = None
@@ -356,11 +401,12 @@ def _create_album(release) -> MetaAlbum:
         genres.extend(release.styles)
     genre = ", ".join(genres) if genres else None
 
-    # Create the album
+    # Create the album with both dates (like MusicBrainz plugin)
     album = MetaAlbum(
         artist=artist,
         title=title,
-        date=date,
+        date=release_date,
+        original_date=original_date,
         country=country,
         label=label,
         catalog_nums=catalog_nums or set(),
