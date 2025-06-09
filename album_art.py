@@ -529,16 +529,25 @@ class AlbumArtManager:
         # Look for image files in the source directory
         image_files = self.path_utils.scan_for_images(source_dir)
 
-        if image_files:
-            # Display found images
-            print(f"🖼️  Image Files Found in: {source_dir}")
-            for image_path in image_files:
-                art_info = self.image_processor.analyze_image_file(image_path)
-                FormatUtils.print_album_art_info(image_path.name, art_info)
+        # Always present the interactive selection interface, even if no local images found
+        choices = create_image_choices(image_files)
 
-            return image_files
+        selected_image = handle_interactive_image_selection(
+            choices,
+            image_files,
+            f"Select album art for: {album.artist} - {album.title}",
+            album_artist=album.artist,
+            album_title=album.title,
+            output_dir=source_dir,
+            allow_covit=True
+        )
 
-        return None
+        if not selected_image:
+            return
+
+        # Store the selected image path for later processing
+        album.custom['selected_album_art_source'] = str(selected_image)
+        print(f"✅ Selected album art: {selected_image.name}")
 
 
 # =============================================================================
@@ -1423,26 +1432,25 @@ def pre_add(item):
     # Look for image files in the source directory
     image_files = scan_directory_for_images(source_dir)
 
-    if image_files:
-        # Use the interactive selection interface
-        choices = create_image_choices(image_files)
+    # Always present the interactive selection interface, even if no local images found
+    choices = create_image_choices(image_files)
 
-        selected_image = handle_interactive_image_selection(
-            choices,
-            image_files,
-            f"Select album art for: {album.artist} - {album.title}",
-            album_artist=album.artist,
-            album_title=album.title,
-            output_dir=source_dir,
-            allow_covit=True
-        )
+    selected_image = handle_interactive_image_selection(
+        choices,
+        image_files,
+        f"Select album art for: {album.artist} - {album.title}",
+        album_artist=album.artist,
+        album_title=album.title,
+        output_dir=source_dir,
+        allow_covit=True
+    )
 
-        if not selected_image:
-            return
+    if not selected_image:
+        return
 
-        # Store the selected image path for later processing
-        album.custom['selected_album_art_source'] = str(selected_image)
-        print(f"✅ Selected album art: {selected_image.name}")
+    # Store the selected image path for later processing
+    album.custom['selected_album_art_source'] = str(selected_image)
+    print(f"✅ Selected album art: {selected_image.name}")
 
 
 @moe.hookimpl(tryfirst=True)
