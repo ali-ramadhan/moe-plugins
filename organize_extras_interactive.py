@@ -3,13 +3,14 @@ Filter extra files plugin for Moe.
 
 This plugin provides an interactive interface to filter and categorize extra files during import.
 Users can select which extra files to keep using checkboxes and categorize them for proper organization.
+For multi-disc albums, users can assign extras to specific discs using left/right arrow keys.
 """
 
 import logging
 import subprocess
 import re
 from collections import defaultdict
-from typing import List, Set, Optional
+from typing import List, Set, Optional, Dict
 from pathlib import Path
 
 from prompt_toolkit import Application
@@ -34,6 +35,9 @@ log = logging.getLogger("moe.filter_extras")
 CATEGORY_COVER = "cover"
 CATEGORY_ARTWORK = "artwork"
 CATEGORY_CUE_LOG = "cue_log"
+
+# Special disc assignment for root/album-level items
+ROOT_DISC = 0
 
 
 @moe.hookimpl
@@ -82,6 +86,25 @@ def _get_safe_display_path(extra: Extra) -> str:
         return extra.path.name
 
 
+def _detect_disc_from_filename(extra: Extra) -> Optional[int]:
+    """Try to detect disc number from filename patterns."""
+    filename = str(extra.path).lower()
+
+    # Common patterns for disc detection
+    patterns = [
+        r"(?:cd|disc|disk)\s*(\d+)",  # cd1, disc 2, disk3, etc.
+        r"(\d+)(?:cd|disc|disk)",     # 1cd, 2disc, 3disk, etc.
+        r"^(\d+)\d{2}-",              # Track numbering like 101-, 201-, etc.
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, filename)
+        if match:
+            return int(match.group(1))
+
+    return None
+
+
 def format_file_size(size_bytes: int) -> str:
     """Format file size in human-readable units."""
     if size_bytes < 1024:
@@ -119,11 +142,23 @@ class ExtrasFilterSelector:
         # Categorization state - maps extra index to category
         self.categories = {}  # int -> str
 
+        # Disc assignment state - maps extra index to disc number (ROOT_DISC for root)
+        self.disc_assignments: Dict[int, int] = {}  # int -> int
+
         # Track which extra is the cover (only one allowed)
         self.cover_index = None
 
+        # Available discs (1 to disc_total, plus ROOT_DISC for multi-disc albums)
+        self.available_discs = [ROOT_DISC] if self.album.disc_total > 1 else []
+        if self.album.disc_total and self.album.disc_total > 1:
+            self.available_discs.extend(range(1, self.album.disc_total + 1))
+
         # Apply default selection and categorization rules
         self._apply_default_rules()
+
+    def _is_multi_disc(self) -> bool:
+        """Check if this is a multi-disc album."""
+        return self.album.disc_total and self.album.disc_total > 1
 
     def _apply_default_rules(self):
         """Apply default selection and categorization rules."""
@@ -134,6 +169,16 @@ class ExtrasFilterSelector:
             if _is_cue_log_file(extra):
                 self.categories[i] = CATEGORY_CUE_LOG
                 self.selected_extras.add(i)  # CUE/log files are selected by default
+
+                # Try to auto-assign disc for CUE/log files
+                if self._is_multi_disc():
+                    detected_disc = _detect_disc_from_filename(extra)
+                    if detected_disc and detected_disc in self.available_discs:
+                        self.disc_assignments[i] = detected_disc
+                    else:
+                        # Default to first disc if can't detect
+                        self.disc_assignments[i] = 1
+
             # Check if file should be excluded by default
             elif _should_exclude_by_default(extra):
                 # Don't add to selected_extras (excluded by default)
@@ -148,15 +193,73 @@ class ExtrasFilterSelector:
                 if i not in self.categories:
                     self.categories[i] = CATEGORY_ARTWORK
 
+                # For multi-disc albums, try to auto-assign disc for artwork
+                if self._is_multi_disc():
+                    detected_disc = _detect_disc_from_filename(extra)
+                    if detected_disc and detected_disc in self.available_discs:
+                        self.disc_assignments[i] = detected_disc
+                    else:
+                        # Default artwork to root unless filename suggests otherwise
+                        self.disc_assignments[i] = ROOT_DISC
+
         # Auto-assign the first image file as cover if we found one
         if potential_cover_index is not None:
             self.cover_index = potential_cover_index
             self.categories[potential_cover_index] = CATEGORY_COVER
+            # Cover always goes to root for multi-disc albums
+            if self._is_multi_disc():
+                self.disc_assignments[potential_cover_index] = ROOT_DISC
 
     def _is_image_file(self, extra: Extra) -> bool:
         """Check if a file is an image based on extension."""
         image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
         return extra.path.suffix.lower() in image_extensions
+
+    def _get_disc_display_name(self, disc_num: int) -> str:
+        """Get display name for a disc number."""
+        if disc_num == ROOT_DISC:
+            return "Root"
+        else:
+            return f"Disc {disc_num}"
+
+    def _get_current_disc(self) -> int:
+        """Get the currently assigned disc for the current item."""
+        if self.current_index in self.disc_assignments:
+            return self.disc_assignments[self.current_index]
+        elif self._is_multi_disc():
+            # Default to root for new assignments in multi-disc albums
+            return ROOT_DISC
+        else:
+            # Single disc albums don't have disc assignments
+            return 1
+
+    def cycle_disc_left(self):
+        """Cycle the current item's disc assignment to the left."""
+        if not self._is_multi_disc() or self.current_index >= len(self.extras):
+            return
+
+        current_disc = self._get_current_disc()
+        try:
+            current_idx = self.available_discs.index(current_disc)
+            new_idx = (current_idx - 1) % len(self.available_discs)
+            self.disc_assignments[self.current_index] = self.available_discs[new_idx]
+        except ValueError:
+            # Current disc not in available discs, default to first
+            self.disc_assignments[self.current_index] = self.available_discs[0]
+
+    def cycle_disc_right(self):
+        """Cycle the current item's disc assignment to the right."""
+        if not self._is_multi_disc() or self.current_index >= len(self.extras):
+            return
+
+        current_disc = self._get_current_disc()
+        try:
+            current_idx = self.available_discs.index(current_disc)
+            new_idx = (current_idx + 1) % len(self.available_discs)
+            self.disc_assignments[self.current_index] = self.available_discs[new_idx]
+        except ValueError:
+            # Current disc not in available discs, default to first
+            self.disc_assignments[self.current_index] = self.available_discs[0]
 
     def get_formatted_text(self):
         """Generate the formatted text for the current state."""
@@ -169,16 +272,24 @@ class ExtrasFilterSelector:
         except (AttributeError, KeyError):
             text_editor = None
 
+        # Build help text based on whether this is multi-disc
+        if self._is_multi_disc():
+            disc_help = "   ←/→ = change disc assignment (multi-disc album)\n"
+        else:
+            disc_help = ""
+
         if text_editor:
             help_text = "💡 Use ↑/↓ to navigate, Space to toggle, Enter to confirm\n" \
                        "   'c' = set as cover, 'a' = set as artwork, 'u' = set as cue/log\n" \
+                       f"{disc_help}" \
                        "   'r' = remove category, 'o' = open file, 't' = text editor, 'q' = quit\n" \
-                       "   Note: All selected files must be categorized and exactly 1 cover required!\n\n"
+                       "   Note: All selected files must be categorized and covers validated!\n\n"
         else:
             help_text = "💡 Use ↑/↓ to navigate, Space to toggle, Enter to confirm\n" \
                        "   'c' = set as cover, 'a' = set as artwork, 'u' = set as cue/log\n" \
+                       f"{disc_help}" \
                        "   'r' = remove category, 'o' = open file, 'q' = quit\n" \
-                       "   Note: All selected files must be categorized and exactly 1 cover required!\n\n"
+                       "   Note: All selected files must be categorized and covers validated!\n\n"
 
         lines = [
             ("class:title", f"Filter and categorize extra files for: {artist} - {title}\n"),
@@ -202,7 +313,17 @@ class ExtrasFilterSelector:
                 # Selected but uncategorized - show warning
                 category_indicator = " ⚠️ (Needs category!)"
 
-            display_text = f"{checkbox} {file_info}{category_indicator}"
+            # Add disc assignment indicator for multi-disc albums
+            disc_indicator = ""
+            if self._is_multi_disc() and i in self.selected_extras:
+                current_disc = self._get_current_disc() if i == self.current_index else self.disc_assignments.get(i, ROOT_DISC)
+                disc_name = self._get_disc_display_name(current_disc)
+                if i == self.current_index:
+                    disc_indicator = f" [{disc_name}]"
+                else:
+                    disc_indicator = f" ({disc_name})"
+
+            display_text = f"{checkbox} {file_info}{category_indicator}{disc_indicator}"
 
             # Determine the style based on selection and current position
             if i == self.current_index:
@@ -234,15 +355,49 @@ class ExtrasFilterSelector:
         warnings = []
         if uncategorized_count > 0:
             warnings.append(f"{uncategorized_count} selected file(s) need categorization")
-        if cover_count == 0:
-            warnings.append("exactly 1 cover file must be selected")
-        elif cover_count > 1:  # This shouldn't happen with current logic, but just in case
-            warnings.append("only 1 cover file allowed")
+
+        # Cover validation for multi-disc albums
+        cover_validation_error = self._validate_covers()
+        if cover_validation_error:
+            warnings.append(cover_validation_error)
 
         if warnings:
             lines.append(("class:warning", f"⚠️  {', '.join(warnings).capitalize()}!\n"))
 
         return FormattedText(lines)
+
+    def _validate_covers(self) -> Optional[str]:
+        """Validate cover requirements for multi-disc albums."""
+        if not self._is_multi_disc():
+            # Single disc albums just need one cover
+            if self.cover_index is None:
+                return "exactly 1 cover file must be selected"
+            return None
+
+        # Multi-disc album validation
+        selected_covers = [i for i in self.selected_extras if self.categories.get(i) == CATEGORY_COVER]
+
+        if not selected_covers:
+            return "at least 1 cover file must be selected"
+
+        # Group covers by disc assignment
+        covers_by_disc = defaultdict(list)
+        for cover_idx in selected_covers:
+            disc = self.disc_assignments.get(cover_idx, ROOT_DISC)
+            covers_by_disc[disc].append(cover_idx)
+
+        # Check if we have a root cover OR covers for all discs
+        has_root_cover = ROOT_DISC in covers_by_disc
+        disc_covers = {disc: covers for disc, covers in covers_by_disc.items() if disc != ROOT_DISC}
+
+        if has_root_cover:
+            # Root cover is sufficient
+            return None
+        elif len(disc_covers) == self.album.disc_total:
+            # Each disc has a cover
+            return None
+        else:
+            return "need either 1 root cover OR 1 cover per disc"
 
     def move_up(self):
         if self.current_index > 0:
@@ -260,24 +415,41 @@ class ExtrasFilterSelector:
                 if self.cover_index == self.current_index:
                     self.cover_index = None
                 del self.categories[self.current_index]
+            # Also remove disc assignment
+            self.disc_assignments.pop(self.current_index, None)
         else:
             # Selecting - add to selected and require categorization
             self.selected_extras.add(self.current_index)
             # Auto-assign as artwork if not already categorized
             if self.current_index not in self.categories:
                 self.categories[self.current_index] = CATEGORY_ARTWORK
+            # Auto-assign to appropriate disc for multi-disc albums
+            if self._is_multi_disc() and self.current_index not in self.disc_assignments:
+                # Try to detect from filename first
+                detected_disc = _detect_disc_from_filename(self.extras[self.current_index])
+                if detected_disc and detected_disc in self.available_discs:
+                    self.disc_assignments[self.current_index] = detected_disc
+                else:
+                    self.disc_assignments[self.current_index] = ROOT_DISC
 
     def select_all(self):
         self.selected_extras = set(range(len(self.extras)))
-        # Ensure all selected files have categories
+        # Ensure all selected files have categories and disc assignments
         for i in self.selected_extras:
             if i not in self.categories:
                 self.categories[i] = CATEGORY_ARTWORK
+            if self._is_multi_disc() and i not in self.disc_assignments:
+                detected_disc = _detect_disc_from_filename(self.extras[i])
+                if detected_disc and detected_disc in self.available_discs:
+                    self.disc_assignments[i] = detected_disc
+                else:
+                    self.disc_assignments[i] = ROOT_DISC
 
     def select_none(self):
         self.selected_extras.clear()
-        # Clear all categories since nothing is selected
+        # Clear all categories and disc assignments since nothing is selected
         self.categories.clear()
+        self.disc_assignments.clear()
         self.cover_index = None
 
     def set_as_cover(self):
@@ -294,6 +466,10 @@ class ExtrasFilterSelector:
             # Ensure it's selected
             self.selected_extras.add(self.current_index)
 
+            # For multi-disc albums, covers default to root
+            if self._is_multi_disc():
+                self.disc_assignments[self.current_index] = ROOT_DISC
+
     def set_as_artwork(self):
         """Set the current file as artwork."""
         if self.current_index < len(self.extras):
@@ -304,6 +480,14 @@ class ExtrasFilterSelector:
             self.categories[self.current_index] = CATEGORY_ARTWORK
             # Ensure it's selected
             self.selected_extras.add(self.current_index)
+
+            # For multi-disc albums, ensure disc assignment exists
+            if self._is_multi_disc() and self.current_index not in self.disc_assignments:
+                detected_disc = _detect_disc_from_filename(self.extras[self.current_index])
+                if detected_disc and detected_disc in self.available_discs:
+                    self.disc_assignments[self.current_index] = detected_disc
+                else:
+                    self.disc_assignments[self.current_index] = ROOT_DISC
 
     def set_as_cue_log(self):
         """Set the current file as CUE/log file."""
@@ -316,14 +500,24 @@ class ExtrasFilterSelector:
             # Ensure it's selected
             self.selected_extras.add(self.current_index)
 
+            # For multi-disc albums, CUE/log files should usually go to a specific disc
+            if self._is_multi_disc() and self.current_index not in self.disc_assignments:
+                detected_disc = _detect_disc_from_filename(self.extras[self.current_index])
+                if detected_disc and detected_disc in self.available_discs:
+                    self.disc_assignments[self.current_index] = detected_disc
+                else:
+                    # Default to first disc for CUE/log files
+                    self.disc_assignments[self.current_index] = 1
+
     def remove_category(self):
         """Remove category from the current file and deselect it."""
         if self.current_index in self.categories:
             if self.cover_index == self.current_index:
                 self.cover_index = None
             del self.categories[self.current_index]
-            # Also deselect the file since it no longer has a category
+            # Also deselect the file and remove disc assignment
             self.selected_extras.discard(self.current_index)
+            self.disc_assignments.pop(self.current_index, None)
 
     def open_current_file(self):
         """Open the currently selected file using xdg-open."""
@@ -366,23 +560,29 @@ class ExtrasFilterSelector:
                 log.warning("No text editor configured in moe config")
 
     def can_confirm(self):
-        """Check if the current state allows confirmation (all selected files are categorized and exactly one cover)."""
+        """Check if the current state allows confirmation (all validation passes)."""
         all_categorized = all(i in self.categories for i in self.selected_extras)
-        has_exactly_one_cover = self.cover_index is not None and self.cover_index in self.selected_extras
-        return all_categorized and has_exactly_one_cover
+        cover_validation_passes = self._validate_covers() is None
+        return all_categorized and cover_validation_passes
 
     def confirm_selection(self):
         # Validate that all selected files are categorized
         if not self.can_confirm():
             return  # Don't exit if validation fails
 
-        # Store categorization info in extras' custom fields
+        # Store categorization and disc assignment info in extras' custom fields
         for i, extra in enumerate(self.extras):
             if i in self.categories:
                 extra.custom["filter_extras_category"] = self.categories[i]
             else:
                 # Remove any existing categorization
                 extra.custom.pop("filter_extras_category", None)
+
+            if i in self.disc_assignments:
+                extra.custom["filter_extras_disc"] = self.disc_assignments[i]
+            else:
+                # Remove any existing disc assignment
+                extra.custom.pop("filter_extras_disc", None)
 
         self.result = [self.extras[i] for i in self.selected_extras]
         get_app().exit()
@@ -433,6 +633,17 @@ def create_extras_filter_interface(extras: List[Extra], album: Album) -> List[Ex
     @kb.add('o')
     def open_file(event):
         selector.open_current_file()
+
+    # Add left/right arrow keys for disc selection (only for multi-disc albums)
+    @kb.add('left')
+    def cycle_disc_left(event):
+        if selector._is_multi_disc():
+            selector.cycle_disc_left()
+
+    @kb.add('right')
+    def cycle_disc_right(event):
+        if selector._is_multi_disc():
+            selector.cycle_disc_right()
 
     # Only add text editor binding if configured
     try:
@@ -502,21 +713,16 @@ def create_extras_filter_interface(extras: List[Extra], album: Album) -> List[Ex
 
 
 def _generate_cue_log_path(extra: Extra) -> str:
-    """Generate path for CUE/log files based on organize_extras.py logic."""
+    """Generate path for CUE/log files based on disc assignment."""
     album = extra.album
     ext = extra.path.suffix
 
-    if album.disc_total == 1:
+    # Get disc assignment from custom field
+    disc_num = extra.custom.get("filter_extras_disc", ROOT_DISC)
+
+    if album.disc_total == 1 or disc_num == ROOT_DISC:
         return f"{album.title}{ext}"
     else:
-        # Try to determine the disc number from the file path
-        disc_match = re.search(r"disc\s*(\d+)", str(extra.path).lower())
-        if disc_match:
-            disc_num = disc_match.group(1)
-        else:
-            # If we can't determine the disc number, use a placeholder
-            disc_num = "X"
-
         disc_dir = f"Disc {disc_num}"
         return str(Path(disc_dir) / f"{album.title} - Disc {disc_num}{ext}")
 
@@ -524,18 +730,28 @@ def _generate_cue_log_path(extra: Extra) -> str:
 def _get_extra_destination_path(extra: Extra) -> str:
     """Get the destination path for an extra file based on its categorization."""
     category = extra.custom.get("filter_extras_category")
+    disc_num = extra.custom.get("filter_extras_disc", ROOT_DISC)
 
     if category == CATEGORY_COVER:
         # Cover files go to root with album title
         ext = extra.path.suffix
-        return f"{extra.album.title}{ext}"
+        if disc_num == ROOT_DISC:
+            return f"{extra.album.title}{ext}"
+        else:
+            # Disc-specific cover
+            disc_dir = f"Disc {disc_num}"
+            return str(Path(disc_dir) / f"{extra.album.title} - Disc {disc_num}{ext}")
 
     elif category == CATEGORY_ARTWORK:
-        # Artwork files go into Artwork/ directory, keep original name
-        return f"Artwork/{extra.path.name}"
+        # Artwork files go into appropriate directory
+        if disc_num == ROOT_DISC:
+            return f"Artwork/{extra.path.name}"
+        else:
+            disc_dir = f"Disc {disc_num}"
+            return str(Path(disc_dir) / "Artwork" / extra.path.name)
 
     elif category == CATEGORY_CUE_LOG:
-        # CUE/log files use organize_extras.py logic
+        # CUE/log files use the new logic
         return _generate_cue_log_path(extra)
 
     # For uncategorized files, use the original name (default behavior)
@@ -546,18 +762,28 @@ def _get_extra_destination_path(extra: Extra) -> str:
 def override_extra_path_config(extra: Extra) -> Optional[str]:
     """Override extra path configuration based on categorization."""
     category = extra.custom.get("filter_extras_category")
+    disc_num = extra.custom.get("filter_extras_disc", ROOT_DISC)
 
     if category == CATEGORY_COVER:
         # Cover files go to root with album title
         ext = extra.path.suffix
-        return f"{extra.album.title}{ext}"
+        if disc_num == ROOT_DISC:
+            return f"{extra.album.title}{ext}"
+        else:
+            # Disc-specific cover
+            disc_dir = f"Disc {disc_num}"
+            return str(Path(disc_dir) / f"{extra.album.title} - Disc {disc_num}{ext}")
 
     elif category == CATEGORY_ARTWORK:
-        # Artwork files go into Artwork/ directory, keep original name
-        return f"Artwork/{extra.path.name}"
+        # Artwork files go into appropriate directory
+        if disc_num == ROOT_DISC:
+            return f"Artwork/{extra.path.name}"
+        else:
+            disc_dir = f"Disc {disc_num}"
+            return str(Path(disc_dir) / "Artwork" / extra.path.name)
 
     elif category == CATEGORY_CUE_LOG:
-        # CUE/log files use organize_extras.py logic
+        # CUE/log files use the new logic
         return _generate_cue_log_path(extra)
 
     # For uncategorized files, use default behavior
@@ -584,7 +810,8 @@ def edit_new_items(session: Session, items):
     for album_obj_id, extras in albums_with_extras.items():
         # Always show the filtering interface, regardless of extra count
         album = album_id_to_album[album_obj_id]
-        print(f"\n📁 Found {len(extras)} extra file{'s' if len(extras) != 1 else ''} for: {album.artist} - {album.title}")
+        disc_info = f" ({album.disc_total} discs)" if album.disc_total and album.disc_total > 1 else ""
+        print(f"\n📁 Found {len(extras)} extra file{'s' if len(extras) != 1 else ''} for: {album.artist} - {album.title}{disc_info}")
 
         # Show the interactive filter interface
         selected_extras = create_extras_filter_interface(extras, album)
@@ -605,17 +832,26 @@ def edit_new_items(session: Session, items):
             # Show which files were kept with their categories and destination paths
             for extra in selected_extras:
                 category = extra.custom.get("filter_extras_category")
+                disc_num = extra.custom.get("filter_extras_disc", ROOT_DISC)
                 dest_path = _get_extra_destination_path(extra)
                 display_path = _get_safe_display_path(extra)
 
+                # Build display with disc info for multi-disc albums
+                disc_display = ""
+                if album.disc_total and album.disc_total > 1:
+                    if disc_num == ROOT_DISC:
+                        disc_display = " [Root]"
+                    else:
+                        disc_display = f" [Disc {disc_num}]"
+
                 if category == CATEGORY_COVER:
-                    print(f"   📸 {display_path} → {dest_path} (Cover)")
+                    print(f"   📸 {display_path}{disc_display} → {dest_path} (Cover)")
                 elif category == CATEGORY_ARTWORK:
-                    print(f"   🎨 {display_path} → {dest_path} (Artwork)")
+                    print(f"   🎨 {display_path}{disc_display} → {dest_path} (Artwork)")
                 elif category == CATEGORY_CUE_LOG:
-                    print(f"   💿 {display_path} → {dest_path} (CUE/Log)")
+                    print(f"   💿 {display_path}{disc_display} → {dest_path} (CUE/Log)")
                 else:
-                    print(f"   ✅ {display_path} → {dest_path}")
+                    print(f"   ✅ {display_path}{disc_display} → {dest_path}")
         else:
             print("✅ All extra files kept")
 
