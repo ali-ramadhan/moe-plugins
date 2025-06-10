@@ -1,6 +1,9 @@
-"""Core Discogs API plugin for Moe.
+"""
+Discogs API plugin for Moe.
 
 Provides Discogs as a metadata source for music tagging.
+
+Heavily based on the beets Discogs plugin: https://github.com/beetbox/beets/blob/master/beetsplug/discogs.py
 
 See Also:
     * https://www.discogs.com/developers/
