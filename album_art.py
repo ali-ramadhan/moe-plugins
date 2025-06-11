@@ -430,6 +430,56 @@ class AudioFileHandler:
         except Exception:
             return False
 
+    @staticmethod
+    def remove_embedded_art(audio_file_path: Path) -> bool:
+        """Remove embedded album art from an audio file."""
+        try:
+            suffix = AudioFileHandler.get_format(audio_file_path)
+
+            if suffix == '.flac':
+                return AudioFileHandler._remove_flac_art(audio_file_path)
+            elif suffix == '.mp3':
+                return AudioFileHandler._remove_mp3_art(audio_file_path)
+            else:
+                return False
+
+        except Exception:
+            return False
+
+    @staticmethod
+    def _remove_flac_art(audio_file_path: Path) -> bool:
+        """Remove album art from FLAC file."""
+        try:
+            flac_file = FLAC(audio_file_path)
+            if flac_file.pictures:
+                flac_file.clear_pictures()
+                flac_file.save()
+                return True
+            return False
+        except Exception:
+            return False
+
+    @staticmethod
+    def _remove_mp3_art(audio_file_path: Path) -> bool:
+        """Remove album art from ID3 tags (MP3)."""
+        try:
+            try:
+                id3_file = ID3(audio_file_path)
+            except ID3NoHeaderError:
+                return False
+
+            # Check if there are any APIC frames to remove
+            apic_keys = [key for key in id3_file.keys() if key.startswith('APIC:')]
+            if apic_keys:
+                # Remove existing album art
+                for key in apic_keys:
+                    del id3_file[key]
+                id3_file.save(audio_file_path)
+                return True
+            return False
+        except Exception:
+            return False
+
 
 class AlbumArtManager:
     """High-level manager for album art operations."""
@@ -567,6 +617,17 @@ def embed_art_batch(files: List[Path], image_path: Path) -> tuple[int, int]:
             print(f"❌ {file_path.name}")
 
     return success_count, total_count
+
+
+def remove_art_batch(files: List[Path]) -> int:
+    """Remove embedded album art from a batch of files. Returns count of files with art removed."""
+    removed_count = 0
+
+    for file_path in files:
+        if AudioFileHandler.remove_embedded_art(file_path):
+            removed_count += 1
+
+    return removed_count
 
 
 def get_source_directory(tracks):
@@ -1178,6 +1239,12 @@ def prompt_and_embed_album_art(tracks, image_files):
     print(f"\n{'🎨 Album Art Embedding'}")
     print("=" * 25)
 
+    # Remove all embedded album art first
+    track_paths = [track.path for track in tracks]
+    removed_count = remove_art_batch(track_paths)
+    if removed_count > 0:
+        print(f"🗑️  Removed embedded album art from {removed_count} track(s)")
+
     tracks_with_art = []
     tracks_without_art = []
 
@@ -1188,33 +1255,8 @@ def prompt_and_embed_album_art(tracks, image_files):
         else:
             tracks_without_art.append(track)
 
-    if tracks_with_art and not tracks_without_art:
-        choice = create_confirm_dialog(
-            f"All {len(tracks)} tracks already have embedded album art. Replace it?"
-        )
-        if not choice:
-            print("⏭️  Skipping album art embedding.")
-            return
-        target_tracks = tracks
-    elif tracks_with_art:
-        choice = create_select_dialog(
-            f"{len(tracks_with_art)} tracks have art, {len(tracks_without_art)} don't. What to do?",
-            choices=[
-                "Embed in tracks without art only",
-                "Replace art in all tracks",
-                "Skip embedding"
-            ]
-        )
-
-        if choice == "Skip embedding":
-            print("⏭️  Skipping album art embedding.")
-            return
-        elif choice == "Embed in tracks without art only":
-            target_tracks = tracks_without_art
-        else:
-            target_tracks = tracks
-    else:
-        target_tracks = tracks
+    # Since we removed all art, all tracks should be without art now
+    target_tracks = tracks
 
     choices = create_image_choices(image_files)
     album = target_tracks[0].album if target_tracks else None
@@ -1242,6 +1284,11 @@ def prompt_and_embed_album_art(tracks, image_files):
 
 def embed_art_for_files(audio_files: List[Path], image_files: List[Path]):
     """Embed album art for a list of audio files."""
+    # Remove all embedded album art first
+    removed_count = remove_art_batch(audio_files)
+    if removed_count > 0:
+        print(f"🗑️  Removed embedded album art from {removed_count} file(s)")
+
     choices = create_image_choices(image_files)
     output_dir = audio_files[0].parent if audio_files else None
 
@@ -1327,6 +1374,31 @@ def analyze_directory_album_art(directory: Path, recursive: bool = False, embed:
     if not audio_files:
         print(f"🚫 No audio files found in {directory}")
         return
+
+    # First, analyze what's there
+    print(f"\n📀 Analyzing {len(audio_files)} audio file(s) for embedded album art...")
+    files_with_art = []
+    for audio_file in audio_files:
+        art_info = AudioFileHandler.analyze_embedded_art(audio_file)
+        if art_info.has_art:
+            files_with_art.append(audio_file)
+
+    # Ask for confirmation before removing embedded art
+    if files_with_art:
+        choice = create_confirm_dialog(
+            f"Found embedded album art in {len(files_with_art)} file(s). Remove all embedded art before processing?"
+        )
+        if not choice:
+            print("⏭️  Skipping album art removal and embedding.")
+            return
+
+        # Remove all embedded album art
+        print(f"🗑️  Removing embedded album art from {len(files_with_art)} file(s)...")
+        removed_count = remove_art_batch(files_with_art)
+        if removed_count > 0:
+            print(f"✅ Removed embedded album art from {removed_count} file(s)")
+        else:
+            print("⚠️  No embedded album art was successfully removed")
 
     print(f"\n📀 Found {len(audio_files)} audio file(s)")
     print("=" * 60)
@@ -1421,7 +1493,7 @@ def pre_add(item):
     print("\n📀 Embedded Album Art Analysis:")
     print("-" * 35)
 
-    # Analyze existing embedded art in all tracks
+    # Analyze existing embedded art in all tracks (for informational purposes only)
     if album.tracks:
         # Sort tracks by disc and track number for consistent display
         sorted_tracks = sorted(album.tracks, key=lambda t: (t.disc, t.track_num))
@@ -1510,6 +1582,12 @@ def process_new_items(session: Session, items):
         art_extra = find_best_album_art_extra(album)
 
         if art_extra and art_extra.path.exists():
+            # Remove all embedded album art from destination files first
+            track_paths = [track.path for track in tracks]
+            removed_count = remove_art_batch(track_paths)
+            if removed_count > 0:
+                print(f"\n🗑️  Removed embedded album art from {removed_count} destination track(s)")
+
             print(f"\n🎨 Embedding {art_extra.path.name} into {len(tracks)} track(s)...")
 
             success_count, total_count = embed_art_batch([track.path for track in tracks], art_extra.path)
