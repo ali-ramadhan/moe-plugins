@@ -106,7 +106,7 @@ def edit_new_items(session, items):
 
         try:
             new_path = prompt(
-                [("class:prompt", "Confirm or edit album path: ")],
+                [("class:prompt", "Confirm or edit album path (Ctrl+C to cancel): ")],
                 default=current_path_str,
                 validator=PathValidator(),
                 validate_while_typing=False,
@@ -127,9 +127,9 @@ def edit_new_items(session, items):
                 log.debug("Album path confirmed without changes")
                 console.print("✅ Path confirmed", style="bold green")
 
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, EOFError):
             log.info("Path confirmation cancelled by user")
-            console.print("\n❌ Path confirmation cancelled", style="bold red")
+            console.print("\n❌ Album path confirmation cancelled by user", style="bold red")
             raise
         except Exception as e:
             log.error(f"Error during path confirmation: {e}")

@@ -155,7 +155,7 @@ def _prompt_for_album_type(album: Album, default_choice: Optional[str] = None) -
         return selected_type
 
     except (KeyboardInterrupt, EOFError):
-        print("\n⏭️  Skipping album classification.")
+        print("\n❌ Album classification cancelled by user")
         return None
     except Exception as e:
         log.error(f"Error during album type prompting: {e}")
@@ -239,6 +239,11 @@ def _create_album_type_selector(prompt_text: str, choice_data: list, default_cho
     def quit(event):
         selector.quit()
 
+    @kb.add('c-c', 'c-c')  # Double Ctrl+C for force exit
+    def force_exit(event):
+        print("\n🛑 Force exiting...")
+        raise SystemExit(0)
+
     # Create the layout
     def get_content():
         return selector.get_formatted_text()
@@ -265,6 +270,7 @@ def _create_album_type_selector(prompt_text: str, choice_data: list, default_cho
         app.run()
         return selector.result
     except (KeyboardInterrupt, EOFError):
+        print("\n❌ Album type classification cancelled by user")
         return None
 
 

@@ -873,6 +873,7 @@ class BaseDialog:
             app.run()
             return self.result
         except (KeyboardInterrupt, EOFError):
+            print("\n❌ Operation cancelled by user")
             return self.get_cancel_result()
 
     def get_formatted_text(self) -> FormattedText:
@@ -975,6 +976,11 @@ class ImageSelector(BaseDialog):
         def quit(event):
             self.quit()
 
+        @kb.add('c-c', 'c-c')  # Double Ctrl+C for force exit
+        def force_exit(event):
+            print("\n🛑 Force exiting...")
+            raise SystemExit(0)
+
         return kb
 
     def get_cancel_result(self):
@@ -1027,6 +1033,11 @@ class ConfirmDialog(BaseDialog):
         @kb.add('c-c')
         def quit(event):
             self.quit()
+
+        @kb.add('c-c', 'c-c')  # Double Ctrl+C for force exit
+        def force_exit(event):
+            print("\n🛑 Force exiting...")
+            raise SystemExit(0)
 
         return kb
 
@@ -1081,6 +1092,11 @@ class SelectDialog(BaseDialog):
         @kb.add('c-c')
         def quit(event):
             self.quit()
+
+        @kb.add('c-c', 'c-c')  # Double Ctrl+C for force exit
+        def force_exit(event):
+            print("\n🛑 Force exiting...")
+            raise SystemExit(0)
 
         return kb
 

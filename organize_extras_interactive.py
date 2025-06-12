@@ -670,6 +670,11 @@ def create_extras_filter_interface(extras: List[Extra], album: Album) -> List[Ex
     def quit(event):
         selector.quit()
 
+    @kb.add('c-c', 'c-c')  # Double Ctrl+C for force exit
+    def force_exit(event):
+        print("\n🛑 Force exiting...")
+        raise SystemExit(0)
+
     # Create the layout
     def get_content():
         return selector.get_formatted_text()
@@ -708,7 +713,8 @@ def create_extras_filter_interface(extras: List[Extra], album: Album) -> List[Ex
         app.run()
         return selector.result if selector.result is not None else extras
     except (KeyboardInterrupt, EOFError):
-        print("\n⏭️  Keeping all extra files.")
+        print("\n❌ Extra file filtering cancelled by user")
+        print("⏭️  Keeping all extra files.")
         return extras
 
 
