@@ -149,7 +149,7 @@ def _build_redoflacs_command(folder_path: Path) -> list[str]:
     Returns:
         List of command arguments for redoflacs.
     """
-    cmd = ['redoflacs', '-c']  # compression operation
+    cmd = ['redoflacs', '-q', '-c']  # compression operation
 
     # Get configuration values
     try:
