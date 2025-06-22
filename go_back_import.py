@@ -5,14 +5,11 @@ and restart the import process.
 """
 
 import logging
-from typing import TYPE_CHECKING
 
 import moe
 from moe.util.cli import PromptChoice
-
-if TYPE_CHECKING:
-    from moe.library import Album
-    from moe.moe_import.import_core import CandidateAlbum
+from moe.library import Album
+from moe.moe_import.import_core import CandidateAlbum
 
 log = logging.getLogger("moe.plugin.go_back_import")
 
@@ -53,14 +50,14 @@ def add_import_prompt_choice(prompt_choices: list[PromptChoice]):
     )
 
 
-def _go_back_to_matches(new_album: "Album", candidate: "CandidateAlbum"):
+def _go_back_to_matches(new_album: Album, candidate: CandidateAlbum):
     """Go back to the candidate selection screen."""
     log.debug("User chose to go back to candidate selection")
     raise GoBackToMatches("Going back to candidate selection")
 
 
 def _wrapped_select_candidate(
-    new_album: "Album", candidates: list["CandidateAlbum"], candidate_num: int
+    new_album: Album, candidates: list[CandidateAlbum], candidate_num: int
 ):
     """Wrapped version of _select_candidate that handles going back."""
     while True:
