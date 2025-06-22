@@ -106,6 +106,7 @@ class TagEditorInterface:
             ("country", "Country", "text"),
             ("barcode", "Barcode", "text"),
             ("catalog_nums", "Catalog Numbers", "set"),
+            ("genres", "Genres", "set"),
             ("disc_total", "Disc Total", "int"),
             ("track_total", "Track Total", "int"),
             ("original_date", "Original Date", "date"),
@@ -123,6 +124,72 @@ class TagEditorInterface:
         # Store original values for comparison
         self.original_album_values = self._get_album_values()
         self.original_track_values = [self._get_track_values(track) for track in self.tracks]
+
+    def _get_all_album_fields(self) -> Dict[str, Any]:
+        """Get all album field values, including non-editable ones."""
+        values = {}
+
+        # Get editable fields first
+        for field_name, _, _ in self.album_fields:
+            value = getattr(self.album, field_name, None)
+            if isinstance(value, set) and value:
+                values[field_name] = ";".join(sorted(value))
+            elif isinstance(value, datetime.date):
+                values[field_name] = value.strftime("%Y-%m-%d")
+            else:
+                values[field_name] = str(value) if value is not None else ""
+
+        # Get custom fields
+        if hasattr(self.album, 'custom') and self.album.custom:
+            for custom_field, custom_value in self.album.custom.items():
+                if custom_field not in values:  # Don't override editable fields
+                    if isinstance(custom_value, (list, set)):
+                        values[custom_field] = ";".join(str(v) for v in custom_value) if custom_value else ""
+                    else:
+                        values[custom_field] = str(custom_value) if custom_value is not None else ""
+
+        return values
+
+    def _get_all_track_fields(self, track: Track) -> Dict[str, Any]:
+        """Get all track field values, including non-editable ones."""
+        values = {}
+
+        # Get editable fields first
+        for field_name, _, _ in self.track_fields:
+            value = getattr(track, field_name, None)
+            if isinstance(value, set) and value:
+                values[field_name] = ";".join(sorted(value))
+            else:
+                values[field_name] = str(value) if value is not None else ""
+
+        # Get custom fields
+        if hasattr(track, 'custom') and track.custom:
+            for custom_field, custom_value in track.custom.items():
+                if custom_field not in values:  # Don't override editable fields
+                    if isinstance(custom_value, (list, set)):
+                        values[custom_field] = ";".join(str(v) for v in custom_value) if custom_value else ""
+                    else:
+                        values[custom_field] = str(custom_value) if custom_value is not None else ""
+
+        return values
+
+    def _get_readonly_fields(self) -> List[str]:
+        """Get list of read-only field names for the current page."""
+        if self.current_page == 0:
+            all_fields = self._get_all_album_fields()
+            editable_field_names = {field_name for field_name, _, _ in self.album_fields}
+        else:
+            track = self.tracks[self.current_page - 1]
+            all_fields = self._get_all_track_fields(track)
+            editable_field_names = {field_name for field_name, _, _ in self.track_fields}
+
+        # Return fields that exist but are not editable
+        readonly_fields = []
+        for field_name, value in all_fields.items():
+            if field_name not in editable_field_names and value.strip():
+                readonly_fields.append(field_name)
+
+        return sorted(readonly_fields)
 
     def _get_album_values(self) -> Dict[str, Any]:
         """Get current album field values."""
@@ -246,9 +313,10 @@ class TagEditorInterface:
         # Help text
         if not self.editing_mode:
             lines.append(("class:help", "💡 Use ↑/↓ to navigate rows, ←/→ to navigate pages\n"))
-            lines.append(("class:help", "   Enter = edit field, Space = confirm and continue, 'q' = quit\n\n"))
+            lines.append(("class:help", "   Enter = edit field, Space = confirm and continue, 'q' = quit\n"))
+            lines.append(("class:help", "   Gray fields are read-only and show existing metadata\n\n"))
 
-        # Fields
+        # Editable Fields
         fields = self.get_current_fields()
         values = self.get_current_values()
 
@@ -277,6 +345,27 @@ class TagEditorInterface:
                     lines.append(("class:changed", f"  {field_label}: {display_value}\n"))
                 else:
                     lines.append(("class:normal", f"  {field_label}: {display_value}\n"))
+
+        # Read-only fields section
+        readonly_fields = self._get_readonly_fields()
+        if readonly_fields:
+            lines.append(("class:readonly_separator", "\n─── Read-only tags ───\n"))
+
+            # Get all field values for the current page
+            if self.current_page == 0:
+                all_values = self._get_all_album_fields()
+            else:
+                track = self.tracks[self.current_page - 1]
+                all_values = self._get_all_track_fields(track)
+
+            for field_name in readonly_fields:
+                value = all_values.get(field_name, "")
+                display_value = value if value else "(empty)"
+
+                # Format field name for display (capitalize and replace underscores)
+                field_label = field_name.replace('_', ' ').title()
+
+                lines.append(("class:readonly", f"  {field_label}: {display_value}\n"))
 
         # Summary of changes
         if self.changes_made:
@@ -504,6 +593,8 @@ def create_tag_editor_interface(album: Album) -> str:
         'changes': '#ansigreen bold',
         'dialog_title': '#ansiwhite bold',
         'dialog_help': '#ansiyellow',
+        'readonly_separator': '#888888',
+        'readonly': '#888888',
     })
 
     # Create and run the application
