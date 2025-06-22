@@ -199,9 +199,9 @@ class InteractiveTrackMatcher:
 
         # Try to get duration if available
         duration = ""
-        if hasattr(track, 'length') and track.length:
-            minutes = int(track.length // 60)
-            seconds = int(track.length % 60)
+        if hasattr(track, 'duration') and track.duration:
+            minutes = int(track.duration // 60)
+            seconds = int(track.duration % 60)
             duration = f" ({minutes}:{seconds:02d})"
         elif hasattr(track, 'path') and track.path:
             # Try to get duration from file metadata
