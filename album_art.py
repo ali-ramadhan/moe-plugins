@@ -309,6 +309,80 @@ class ImageProcessor:
                 compressed_path.unlink()
             return None
 
+    @staticmethod
+    def resize_image(image_path: Path, size_str: str) -> Optional[Path]:
+        """Resize an image using ImageMagick with specified dimensions. Returns path to new resized file."""
+        # Check if ImageMagick is available
+        try:
+            subprocess.run(["convert", "-version"], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print(f"\n❌ ImageMagick 'convert' command not found. Please install ImageMagick to resize images.")
+            return None
+
+        # Validate size format (should be like "1750x1750" or "1750x1750!")
+        import re
+        size_pattern = r'^(\d+)x(\d+)(!?)$'
+        match = re.match(size_pattern, size_str)
+        if not match:
+            print(f"\n❌ Invalid size format: '{size_str}'. Use format like '1750x1750' or '1750x1750!' (with ! to ignore aspect ratio)")
+            return None
+
+        width, height, force_flag = match.groups()
+
+        # Get original file info
+        try:
+            with Image.open(image_path) as img:
+                original_width, original_height = img.size
+        except Exception as e:
+            print(f"\n❌ Error reading original image: {e}")
+            return None
+
+        # Create resized version with size suffix in filename
+        stem = image_path.stem
+        suffix = image_path.suffix
+        size_suffix = f"{width}x{height}" + ("!" if force_flag else "")
+        resized_filename = f"{stem}_{size_suffix}{suffix}"
+        resized_path = image_path.parent / resized_filename
+
+        try:
+            # Use ImageMagick to resize the image
+            resize_arg = f"{width}x{height}" + ("!" if force_flag else "")
+            subprocess.run([
+                "convert",
+                str(image_path),
+                "-resize", resize_arg,
+                str(resized_path)
+            ], check=True, capture_output=True)
+
+            # Get resized image info
+            try:
+                with Image.open(resized_path) as img:
+                    new_width, new_height = img.size
+                resized_size = resized_path.stat().st_size
+                original_size = image_path.stat().st_size
+
+                print(f"\n✅ Created resized version: {resized_filename}")
+                print(f"   {original_width}×{original_height} → {new_width}×{new_height}")
+                print(f"   {FormatUtils.format_file_size(original_size)} → {FormatUtils.format_file_size(resized_size)}")
+                return resized_path
+            except Exception as e:
+                print(f"\n✅ Created resized version: {resized_filename}")
+                print(f"   Requested size: {width}×{height}")
+                return resized_path
+
+        except subprocess.CalledProcessError as e:
+            print(f"\n❌ Error resizing image: {e}")
+            # Clean up if resize failed
+            if resized_path.exists():
+                resized_path.unlink()
+            return None
+        except Exception as e:
+            print(f"\n❌ Unexpected error during resize: {e}")
+            # Clean up if resize failed
+            if resized_path.exists():
+                resized_path.unlink()
+            return None
+
 
 class AudioFileHandler:
     """Centralized handler for audio file operations."""
@@ -910,7 +984,7 @@ class ImageSelector(BaseDialog):
         """Generate the formatted text for the current state."""
         lines = [
             ("class:title", f"{self.prompt_text}\n"),
-            ("class:info", "💡 Use ↑/↓ to navigate, Enter to select, 'o' to open/preview, 'c' to compress JPEG, 'q' to quit\n\n"),
+            ("class:info", "💡 Use ↑/↓ to navigate, Enter to select, 'o' to open/preview, 'c' to compress JPEG, 'r' to resize, 'q' to quit\n\n"),
         ]
 
         for i, choice in enumerate(self.choices):
@@ -969,6 +1043,22 @@ class ImageSelector(BaseDialog):
 
             # Exit the current dialog to prompt for quality
             self.result = f"🗜️ Compress: {selected_image}"
+            get_app().exit()
+
+        @kb.add('r')
+        def resize(event):
+            if self.selected_index >= len(self.image_files):
+                return
+
+            selected_image = self.image_files[self.selected_index]
+
+            # Check if it's a downloaded file (in temp directory)
+            temp_dir = PathUtils.get_temp_art_dir()
+            if not str(selected_image).startswith(str(temp_dir)):
+                return
+
+            # Exit the current dialog to prompt for size
+            self.result = f"📐 Resize: {selected_image}"
             get_app().exit()
 
         @kb.add('q')
@@ -1215,6 +1305,41 @@ def handle_interactive_image_selection(choices, image_files, prompt_text, album_
                 continue  # Restart the selection with updated choices
             else:
                 continue  # Restart the selection if compression failed
+
+        if selected.startswith("📐 Resize: "):
+            # Extract the image path from the result
+            image_path_str = selected[len("📐 Resize: "):]
+            image_path = Path(image_path_str)
+
+            # Check if it's a downloaded file (in temp directory)
+            temp_dir = PathUtils.get_temp_art_dir()
+            if not str(image_path).startswith(str(temp_dir)):
+                print(f"\n⚠️  Cannot resize {image_path.name}: Only downloaded covers can be resized")
+                continue
+
+            # Prompt for image size (now outside the prompt_toolkit application)
+            print(f"\n📐 Resizing {image_path.name}...")
+            print("    Examples: 1750x1750 (maintain aspect ratio), 1750x1750! (ignore aspect ratio)")
+            try:
+                size_str = input("Enter image size (e.g., 1750x1750): ")
+                if not size_str.strip():
+                    print("\n⚠️  No size entered. Resize cancelled.")
+                    continue
+                size_str = size_str.strip()
+            except (KeyboardInterrupt, EOFError):
+                print("\n⏭️  Resize cancelled.")
+                continue
+
+            # Perform resize
+            resized_path = ImageProcessor.resize_image(image_path, size_str)
+            if resized_path:
+                # Add the resized file to the list
+                image_files.append(resized_path)
+                # Recreate choices with the new resized file
+                choices = create_image_choices(image_files)
+                continue  # Restart the selection with updated choices
+            else:
+                continue  # Restart the selection if resize failed
 
         if selected == "🌐 Fetch album art online":
             if allow_covit and album_artist and album_title:
