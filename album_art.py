@@ -254,61 +254,60 @@ class ImageProcessor:
         return mime_types.get(suffix, 'image/jpeg')
 
     @staticmethod
-    def compress_jpeg_image(image_path: Path) -> bool:
-        """Compress a JPEG image using ImageMagick."""
+    def compress_jpeg_image(image_path: Path, quality: int = 90) -> Optional[Path]:
+        """Compress a JPEG image using ImageMagick with specified quality. Returns path to new compressed file."""
         # Check if ImageMagick is available
         try:
             subprocess.run(["convert", "-version"], capture_output=True, check=True)
         except (subprocess.CalledProcessError, FileNotFoundError):
             print(f"\n❌ ImageMagick 'convert' command not found. Please install ImageMagick to compress images.")
-            return False
+            return None
 
         # Get original file size
         original_size = image_path.stat().st_size
 
-        # Create compressed version
-        compressed_path = image_path.with_suffix('.compressed.jpg')
+        # Create compressed version with quality suffix in filename
+        stem = image_path.stem
+        suffix = image_path.suffix
+        compressed_filename = f"{stem}_q{quality}{suffix}"
+        compressed_path = image_path.parent / compressed_filename
 
         try:
-            # Use ImageMagick to compress the JPEG to quality 90
+            # Use ImageMagick to compress the JPEG to specified quality
             subprocess.run([
                 "convert",
                 str(image_path),
-                "-quality", "90",
+                "-quality", str(quality),
                 str(compressed_path)
             ], check=True, capture_output=True)
 
             # Get compressed file size
             compressed_size = compressed_path.stat().st_size
 
-            # Only replace if compression actually made it smaller
+            # Calculate compression ratio
             if compressed_size < original_size:
-                # Replace the original file with compressed version
-                compressed_path.replace(image_path)
-
-                # Calculate compression ratio
                 ratio = (original_size - compressed_size) / original_size * 100
-
-                print(f"\n✅ Compressed {image_path.name}: {FormatUtils.format_file_size(original_size)} → {FormatUtils.format_file_size(compressed_size)} (-{ratio:.1f}%)")
-                return True
+                print(f"\n✅ Created compressed version: {compressed_filename}")
+                print(f"   {FormatUtils.format_file_size(original_size)} → {FormatUtils.format_file_size(compressed_size)} (-{ratio:.1f}%)")
+                return compressed_path
             else:
                 # Remove compressed version if it's not smaller
                 compressed_path.unlink()
-                print(f"\n⚠️  Compression didn't reduce file size for {image_path.name}")
-                return False
+                print(f"\n⚠️  Compression didn't reduce file size for {image_path.name} at quality {quality}")
+                return None
 
         except subprocess.CalledProcessError as e:
             print(f"\n❌ Error compressing image: {e}")
             # Clean up if compression failed
             if compressed_path.exists():
                 compressed_path.unlink()
-            return False
+            return None
         except Exception as e:
             print(f"\n❌ Unexpected error during compression: {e}")
             # Clean up if compression failed
             if compressed_path.exists():
                 compressed_path.unlink()
-            return False
+            return None
 
 
 class AudioFileHandler:
@@ -968,6 +967,7 @@ class ImageSelector(BaseDialog):
             if not str(selected_image).startswith(str(temp_dir)):
                 return
 
+            # Exit the current dialog to prompt for quality
             self.result = f"🗜️ Compress: {selected_image}"
             get_app().exit()
 
@@ -1187,9 +1187,30 @@ def handle_interactive_image_selection(choices, image_files, prompt_text, album_
                 print(f"\n⚠️  Cannot compress {image_path.name}: Only downloaded covers can be compressed")
                 continue
 
+            # Prompt for JPEG quality (now outside the prompt_toolkit application)
+            print(f"\n🗜️  Compressing {image_path.name}...")
+            try:
+                quality_str = input("Enter JPEG quality (0-100, default 90): ")
+                if not quality_str.strip():
+                    quality = 90
+                else:
+                    quality = int(quality_str.strip())
+                    if quality < 0 or quality > 100:
+                        print(f"\n⚠️  Invalid quality value: {quality}. Must be between 0 and 100.")
+                        continue
+            except ValueError:
+                print(f"\n⚠️  Invalid quality value: '{quality_str}'. Must be a number between 0 and 100.")
+                continue
+            except (KeyboardInterrupt, EOFError):
+                print("\n⏭️  Compression cancelled.")
+                continue
+
             # Perform compression
-            if ImageProcessor.compress_jpeg_image(image_path):
-                # Recreate choices with updated file size
+            compressed_path = ImageProcessor.compress_jpeg_image(image_path, quality)
+            if compressed_path:
+                # Add the compressed file to the list
+                image_files.append(compressed_path)
+                # Recreate choices with the new compressed file
                 choices = create_image_choices(image_files)
                 continue  # Restart the selection with updated choices
             else:
@@ -1506,16 +1527,21 @@ def pre_add(item):
     # Get source directory from album path
     source_dir = album.path
 
-    print("\n📀 Embedded Album Art Analysis:")
-    print("-" * 35)
-
-    # Analyze existing embedded art in all tracks (for informational purposes only)
+    # Analyze existing embedded art in all tracks (for summary only)
     if album.tracks:
-        # Sort tracks by disc and track number for consistent display
-        sorted_tracks = sorted(album.tracks, key=lambda t: (t.disc, t.track_num))
-        for track in sorted_tracks:
+        tracks_with_art = 0
+        tracks_without_art = 0
+
+        for track in album.tracks:
             art_info = AudioFileHandler.analyze_embedded_art(track.path)
-            FormatUtils.print_album_art_info(track.path.name, art_info)
+            if art_info.has_art:
+                tracks_with_art += 1
+            else:
+                tracks_without_art += 1
+
+        print(f"📊 {len(album.tracks)} tracks total: {tracks_with_art} with embedded art, {tracks_without_art} without")
+        if tracks_with_art > 0:
+            print("🗑️  All embedded art will be removed before applying selected album art")
 
     # Look for image files in the source directory
     image_files = scan_directory_for_images(source_dir)
