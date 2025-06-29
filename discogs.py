@@ -474,6 +474,20 @@ def _create_tracks(tracklist, album: MetaAlbum) -> list[MetaTrack]:
             if duration_str:
                 duration = _parse_duration(duration_str)
 
+        # Get composer information if available
+        # Discogs sometimes includes composer in extraartists with role "Composed By"
+        composer = None
+        composer_sort = None
+        if _safe_has(track_data, 'extraartists'):
+            extra_artists = _safe_get(track_data, 'extraartists', [])
+            for extra_artist in extra_artists:
+                role = _safe_get(extra_artist, 'role', '').lower()
+                if 'compos' in role:  # Matches "Composed By", "Composer", etc.
+                    composer = _safe_get(extra_artist, 'name')
+                    # Discogs doesn't typically have sort names, so use regular name
+                    composer_sort = composer
+                    break
+
         track = MetaTrack(
             album=album,
             title=title,
@@ -481,6 +495,8 @@ def _create_tracks(tracklist, album: MetaAlbum) -> list[MetaTrack]:
             track_num=track_num,
             disc=disc,
             length=duration,
+            composer=composer,
+            composer_sort=composer_sort,
         )
         tracks.append(track)
 
