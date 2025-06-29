@@ -117,6 +117,8 @@ class TagEditorInterface:
             ("title", "Title", "text"),
             ("track_num", "Track Number", "int"),
             ("disc", "Disc", "int"),
+            ("composer", "Composer", "text"),
+            ("composer_sort", "Composer Sort", "text"),
             ("artists", "Artists", "set"),
             ("genres", "Genres", "set"),
         ]
