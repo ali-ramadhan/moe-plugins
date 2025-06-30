@@ -65,4 +65,5 @@ def media_encoding(album):
     audio_format = album_audio_format(album)
     bit_depth = album_bit_depth(album)
     sample_rate = album_sample_rate(album)
-    return f"{media} {audio_format} {bit_depth} {sample_rate}"
+    country = f"{album.country} " if album.country else ""
+    return f"{country}{media} {audio_format} {bit_depth} {sample_rate}"
