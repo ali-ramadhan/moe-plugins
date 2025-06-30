@@ -254,7 +254,7 @@ class ImageProcessor:
         return mime_types.get(suffix, 'image/jpeg')
 
     @staticmethod
-    def compress_jpeg_image(image_path: Path, quality: int = 90) -> Optional[Path]:
+    def compress_jpeg_image(image_path: Path, quality: int = 90, output_dir: Optional[Path] = None) -> Optional[Path]:
         """Compress a JPEG image using ImageMagick with specified quality. Returns path to new compressed file."""
         # Check if ImageMagick is available
         try:
@@ -270,7 +270,18 @@ class ImageProcessor:
         stem = image_path.stem
         suffix = image_path.suffix
         compressed_filename = f"{stem}_q{quality}{suffix}"
-        compressed_path = image_path.parent / compressed_filename
+
+        # Determine output directory - use temp directory for local images to avoid modifying originals
+        if output_dir is None:
+            temp_dir = PathUtils.get_temp_art_dir()
+            if not str(image_path).startswith(str(temp_dir)):
+                # It's a local image, save to temp directory
+                output_dir = temp_dir
+            else:
+                # It's already a temp file, save alongside it
+                output_dir = image_path.parent
+
+        compressed_path = output_dir / compressed_filename
 
         try:
             # Use ImageMagick to compress the JPEG to specified quality
@@ -310,7 +321,7 @@ class ImageProcessor:
             return None
 
     @staticmethod
-    def resize_image(image_path: Path, size_str: str) -> Optional[Path]:
+    def resize_image(image_path: Path, size_str: str, output_dir: Optional[Path] = None) -> Optional[Path]:
         """Resize an image using ImageMagick with specified dimensions. Returns path to new resized file."""
         # Check if ImageMagick is available
         try:
@@ -342,7 +353,18 @@ class ImageProcessor:
         suffix = image_path.suffix
         size_suffix = f"{width}x{height}" + ("!" if force_flag else "")
         resized_filename = f"{stem}_{size_suffix}{suffix}"
-        resized_path = image_path.parent / resized_filename
+
+        # Determine output directory - use temp directory for local images to avoid modifying originals
+        if output_dir is None:
+            temp_dir = PathUtils.get_temp_art_dir()
+            if not str(image_path).startswith(str(temp_dir)):
+                # It's a local image, save to temp directory
+                output_dir = temp_dir
+            else:
+                # It's already a temp file, save alongside it
+                output_dir = image_path.parent
+
+        resized_path = output_dir / resized_filename
 
         try:
             # Use ImageMagick to resize the image
@@ -1036,11 +1058,6 @@ class ImageSelector(BaseDialog):
             if selected_image.suffix.lower() not in ['.jpg', '.jpeg']:
                 return
 
-            # Check if it's a downloaded file (in temp directory)
-            temp_dir = PathUtils.get_temp_art_dir()
-            if not str(selected_image).startswith(str(temp_dir)):
-                return
-
             # Exit the current dialog to prompt for quality
             self.result = f"🗜️ Compress: {selected_image}"
             get_app().exit()
@@ -1051,11 +1068,6 @@ class ImageSelector(BaseDialog):
                 return
 
             selected_image = self.image_files[self.selected_index]
-
-            # Check if it's a downloaded file (in temp directory)
-            temp_dir = PathUtils.get_temp_art_dir()
-            if not str(selected_image).startswith(str(temp_dir)):
-                return
 
             # Exit the current dialog to prompt for size
             self.result = f"📐 Resize: {selected_image}"
@@ -1268,12 +1280,6 @@ def handle_interactive_image_selection(choices, image_files, prompt_text, album_
                 print(f"\n⚠️  Cannot compress {image_path.name}: Only JPEG files can be compressed")
                 continue
 
-            # Check if it's a downloaded file (in temp directory)
-            temp_dir = PathUtils.get_temp_art_dir()
-            if not str(image_path).startswith(str(temp_dir)):
-                print(f"\n⚠️  Cannot compress {image_path.name}: Only downloaded covers can be compressed")
-                continue
-
             # Prompt for JPEG quality (now outside the prompt_toolkit application)
             print(f"\n🗜️  Compressing {image_path.name}...")
             try:
@@ -1307,12 +1313,6 @@ def handle_interactive_image_selection(choices, image_files, prompt_text, album_
             # Extract the image path from the result
             image_path_str = selected[len("📐 Resize: "):]
             image_path = Path(image_path_str)
-
-            # Check if it's a downloaded file (in temp directory)
-            temp_dir = PathUtils.get_temp_art_dir()
-            if not str(image_path).startswith(str(temp_dir)):
-                print(f"\n⚠️  Cannot resize {image_path.name}: Only downloaded covers can be resized")
-                continue
 
             # Prompt for image size (now outside the prompt_toolkit application)
             print(f"\n📐 Resizing {image_path.name}...")
