@@ -35,6 +35,7 @@ log = logging.getLogger("moe.filter_extras")
 CATEGORY_COVER = "cover"
 CATEGORY_ARTWORK = "artwork"
 CATEGORY_CUE_LOG = "cue_log"
+CATEGORY_DATA = "data"
 
 # Special disc assignment for root/album-level items
 ROOT_DISC = 0
@@ -280,13 +281,13 @@ class ExtrasFilterSelector:
 
         if text_editor:
             help_text = "💡 Use ↑/↓ to navigate, Space to toggle, Enter to confirm\n" \
-                       "   'c' = set as cover, 'a' = set as artwork, 'u' = set as cue/log\n" \
+                       "   'c' = set as cover, 'a' = set as artwork, 'u' = set as cue/log, 'd' = set as data\n" \
                        f"{disc_help}" \
                        "   'r' = remove category, 'o' = open file, 't' = text editor, 'q' = quit\n" \
                        "   Note: All selected files must be categorized and covers validated!\n\n"
         else:
             help_text = "💡 Use ↑/↓ to navigate, Space to toggle, Enter to confirm\n" \
-                       "   'c' = set as cover, 'a' = set as artwork, 'u' = set as cue/log\n" \
+                       "   'c' = set as cover, 'a' = set as artwork, 'u' = set as cue/log, 'd' = set as data\n" \
                        f"{disc_help}" \
                        "   'r' = remove category, 'o' = open file, 'q' = quit\n" \
                        "   Note: All selected files must be categorized and covers validated!\n\n"
@@ -309,6 +310,8 @@ class ExtrasFilterSelector:
                     category_indicator = " (🎨 Artwork)"
                 elif self.categories[i] == CATEGORY_CUE_LOG:
                     category_indicator = " (💿 CUE/Log)"
+                elif self.categories[i] == CATEGORY_DATA:
+                    category_indicator = " (📊 Data)"
             elif i in self.selected_extras:
                 # Selected but uncategorized - show warning
                 category_indicator = " ⚠️ (Needs category!)"
@@ -344,12 +347,13 @@ class ExtrasFilterSelector:
         cover_count = 1 if self.cover_index is not None else 0
         artwork_count = sum(1 for cat in self.categories.values() if cat == CATEGORY_ARTWORK)
         cue_log_count = sum(1 for cat in self.categories.values() if cat == CATEGORY_CUE_LOG)
+        data_count = sum(1 for cat in self.categories.values() if cat == CATEGORY_DATA)
 
         # Count uncategorized selected files
         uncategorized_count = len([i for i in self.selected_extras if i not in self.categories])
 
         lines.append(("class:summary", f"\nSelected: {selected_count}/{total_count} files\n"))
-        lines.append(("class:summary", f"Categorized: Cover({cover_count}), Artwork({artwork_count}), CUE/Log({cue_log_count})\n"))
+        lines.append(("class:summary", f"Categorized: Cover({cover_count}), Artwork({artwork_count}), CUE/Log({cue_log_count}), Data({data_count})\n"))
 
         # Show validation warnings
         warnings = []
@@ -509,6 +513,25 @@ class ExtrasFilterSelector:
                     # Default to first disc for CUE/log files
                     self.disc_assignments[self.current_index] = 1
 
+    def set_as_data(self):
+        """Set the current file as data."""
+        if self.current_index < len(self.extras):
+            # Remove from cover if it was set
+            if self.cover_index == self.current_index:
+                self.cover_index = None
+
+            self.categories[self.current_index] = CATEGORY_DATA
+            # Ensure it's selected
+            self.selected_extras.add(self.current_index)
+
+            # For multi-disc albums, ensure disc assignment exists
+            if self._is_multi_disc() and self.current_index not in self.disc_assignments:
+                detected_disc = _detect_disc_from_filename(self.extras[self.current_index])
+                if detected_disc and detected_disc in self.available_discs:
+                    self.disc_assignments[self.current_index] = detected_disc
+                else:
+                    self.disc_assignments[self.current_index] = ROOT_DISC
+
     def remove_category(self):
         """Remove category from the current file and deselect it."""
         if self.current_index in self.categories:
@@ -625,6 +648,10 @@ def create_extras_filter_interface(extras: List[Extra], album: Album) -> List[Ex
     @kb.add('u')
     def set_cue_log(event):
         selector.set_as_cue_log()
+
+    @kb.add('d')
+    def set_data(event):
+        selector.set_as_data()
 
     @kb.add('r')
     def remove_category(event):
@@ -755,6 +782,14 @@ def _get_extra_destination_path(extra: Extra) -> str:
             disc_dir = f"Disc {disc_num}"
             return str(Path(disc_dir) / "Artwork" / extra.path.name)
 
+    elif category == CATEGORY_DATA:
+        # Data files go into appropriate directory
+        if disc_num == ROOT_DISC:
+            return f"Data/{extra.path.name}"
+        else:
+            disc_dir = f"Disc {disc_num}"
+            return str(Path(disc_dir) / "Data" / extra.path.name)
+
     elif category == CATEGORY_CUE_LOG:
         # CUE/log files use the new logic
         return _generate_cue_log_path(extra)
@@ -786,6 +821,14 @@ def override_extra_path_config(extra: Extra) -> Optional[str]:
         else:
             disc_dir = f"Disc {disc_num}"
             return str(Path(disc_dir) / "Artwork" / extra.path.name)
+
+    elif category == CATEGORY_DATA:
+        # Data files go into appropriate directory
+        if disc_num == ROOT_DISC:
+            return f"Data/{extra.path.name}"
+        else:
+            disc_dir = f"Disc {disc_num}"
+            return str(Path(disc_dir) / "Data" / extra.path.name)
 
     elif category == CATEGORY_CUE_LOG:
         # CUE/log files use the new logic
@@ -853,6 +896,8 @@ def edit_new_items(session: Session, items):
                     print(f"   📸 {display_path}{disc_display} → {dest_path} (Cover)")
                 elif category == CATEGORY_ARTWORK:
                     print(f"   🎨 {display_path}{disc_display} → {dest_path} (Artwork)")
+                elif category == CATEGORY_DATA:
+                    print(f"   📊 {display_path}{disc_display} → {dest_path} (Data)")
                 elif category == CATEGORY_CUE_LOG:
                     print(f"   💿 {display_path}{disc_display} → {dest_path} (CUE/Log)")
                 else:
