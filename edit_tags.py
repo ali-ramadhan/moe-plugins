@@ -624,7 +624,43 @@ def edit_new_items(session: Session, items):
     if not albums:
         return
 
+    def normalize_artist_string(artist_value: str) -> str:
+        """Convert comma-separated artists to semicolon-separated with proper formatting."""
+        if not artist_value or not isinstance(artist_value, str):
+            return artist_value
+
+        # Split on commas, strip whitespace, and rejoin with semicolons
+        artists = [artist.strip() for artist in artist_value.split(',') if artist.strip()]
+        return ';'.join(artists)
+
+    def preprocess_artist_tags(album: Album):
+        """Preprocess artist tags to convert commas to semicolons."""
+        # Process album-level artist
+        if hasattr(album, 'artist') and album.artist:
+            album.artist = normalize_artist_string(album.artist)
+
+        # Process track-level artist and artists fields
+        for track in album.tracks:
+            # Process single artist field
+            if hasattr(track, 'artist') and track.artist:
+                track.artist = normalize_artist_string(track.artist)
+
+            # Process artists set field - need to handle if it contains comma-separated values
+            if hasattr(track, 'artists') and track.artists:
+                normalized_artists = set()
+                for artist in track.artists:
+                    if isinstance(artist, str) and ',' in artist:
+                        # Split comma-separated artist and add individual artists
+                        split_artists = [a.strip() for a in artist.split(',') if a.strip()]
+                        normalized_artists.update(split_artists)
+                    else:
+                        normalized_artists.add(artist)
+                track.artists = normalized_artists
+
     for album in albums:
+        # Preprocess artist tags before showing the editor
+        preprocess_artist_tags(album)
+
         # Show the interactive tag editor
         print(f"\n🎵 Editing tags for: {album.artist} - {album.title}")
 
