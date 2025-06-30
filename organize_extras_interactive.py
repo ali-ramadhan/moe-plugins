@@ -666,11 +666,10 @@ def create_extras_filter_interface(extras: List[Extra], album: Album) -> List[Ex
             pass
 
     @kb.add('q')
-    @kb.add('c-c')  # Ctrl+C
     def quit(event):
         selector.quit()
 
-    @kb.add('c-c', 'c-c')  # Double Ctrl+C for force exit
+    @kb.add('c-c')  # Single Ctrl+C for force exit
     def force_exit(event):
         print("\n🛑 Force exiting...")
         raise SystemExit(0)

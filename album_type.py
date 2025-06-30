@@ -235,11 +235,10 @@ def _create_album_type_selector(prompt_text: str, choice_data: list, default_cho
         selector.select_current()
 
     @kb.add('q')
-    @kb.add('c-c')  # Ctrl+C
     def quit(event):
         selector.quit()
 
-    @kb.add('c-c', 'c-c')  # Double Ctrl+C for force exit
+    @kb.add('c-c')  # Single Ctrl+C for force exit
     def force_exit(event):
         print("\n🛑 Force exiting...")
         raise SystemExit(0)

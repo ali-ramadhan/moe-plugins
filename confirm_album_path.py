@@ -129,8 +129,8 @@ def edit_new_items(session, items):
 
         except (KeyboardInterrupt, EOFError):
             log.info("Path confirmation cancelled by user")
-            console.print("\n❌ Album path confirmation cancelled by user", style="bold red")
-            raise
+            console.print("\n🛑 Force exiting...", style="bold red")
+            raise SystemExit(0)
         except Exception as e:
             log.error(f"Error during path confirmation: {e}")
             console.print(f"\n❌ Error: {e}", style="bold red")

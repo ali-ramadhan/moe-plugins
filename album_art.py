@@ -1062,11 +1062,10 @@ class ImageSelector(BaseDialog):
             get_app().exit()
 
         @kb.add('q')
-        @kb.add('c-c')
         def quit(event):
             self.quit()
 
-        @kb.add('c-c', 'c-c')  # Double Ctrl+C for force exit
+        @kb.add('c-c')  # Single Ctrl+C for force exit
         def force_exit(event):
             print("\n🛑 Force exiting...")
             raise SystemExit(0)
@@ -1120,11 +1119,10 @@ class ConfirmDialog(BaseDialog):
             get_app().exit()
 
         @kb.add('q')
-        @kb.add('c-c')
         def quit(event):
             self.quit()
 
-        @kb.add('c-c', 'c-c')  # Double Ctrl+C for force exit
+        @kb.add('c-c')  # Single Ctrl+C for force exit
         def force_exit(event):
             print("\n🛑 Force exiting...")
             raise SystemExit(0)
@@ -1179,11 +1177,10 @@ class SelectDialog(BaseDialog):
             get_app().exit()
 
         @kb.add('q')
-        @kb.add('c-c')
         def quit(event):
             self.quit()
 
-        @kb.add('c-c', 'c-c')  # Double Ctrl+C for force exit
+        @kb.add('c-c')  # Single Ctrl+C for force exit
         def force_exit(event):
             print("\n🛑 Force exiting...")
             raise SystemExit(0)

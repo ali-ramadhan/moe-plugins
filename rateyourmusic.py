@@ -153,8 +153,8 @@ def create_genre_editor_interface(album: Album) -> str:
             console.print()
 
     except (KeyboardInterrupt, EOFError):
-        console.print("\n❌ Genre editing cancelled by user", style="bold red")
-        return "quit"
+        console.print("\n🛑 Force exiting...", style="bold red")
+        raise SystemExit(0)
 
     # Genre editing prompt
     try:
@@ -195,8 +195,8 @@ def create_genre_editor_interface(album: Album) -> str:
             return "skip"
 
     except (KeyboardInterrupt, EOFError):
-        console.print("\n❌ Genre editing cancelled by user", style="bold red")
-        return "quit"
+        console.print("\n🛑 Force exiting...", style="bold red")
+        raise SystemExit(0)
     except Exception as e:
         log.error(f"Error during genre editing: {e}")
         console.print(f"\n❌ Error: {e}", style="bold red")
