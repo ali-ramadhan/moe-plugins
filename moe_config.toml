@@ -6,6 +6,8 @@
 # List of any plugins to explicitly enable.
 enable_plugins = [
     "musicbrainz",
+    "discogs",
+    # "beatport",
 
     "bucket",
     "disc_and_track",
@@ -13,38 +15,54 @@ enable_plugins = [
     "media_encoding",
     "the",
     "year_reissue",
+    "album_composer",
 
+    "interactive_matching",
     "organize_extras_interactive",
 
     "album_type",
     "album_art",
+    "rateyourmusic",
     "redoflacs_test",
     "redoflacs_compress",
 
+    "edit_tags",
     "confirm_album_path",
+    "go_back_import",
+    "use_file_metadata",
 ]
 
 library_path = "/home/alir/music-tagging-moe/library-tagged"
 original_date = false
+
+[import]
+max_candidates = 9
 
 [move]
 # Whether or not to convert all filesystem paths to ASCII.
 asciify_paths = false
 
 # Album filesystem path format relative to the global configuration option, library_path.
-album_path = "{bucket(the(album.artist))}/{the(album.artist)}/{album.artist} - {album.title} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
+album_path = "Artists/{bucket(the(album.artist))}/{the(album.artist)}/{album.artist} - {album.title} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
 
 # Track filesystem path format relative to album_path.
-track_path = "{disc_dir_padded(track, album)}/{track.track_num:02d}. {track.title}{track.path.suffix}"
+track_path = "{disc_dir_padded(track, album)}/{disc_and_track_num(track, album)}. {track.title}{track.path.suffix}"
+
+[musicbrainz]
+search_limit = 5
+
+[discogs]
+user_token = "hHhCyRWpOfKFkDwsKQsFOiZSKKzEqSCIKLZtmCNA"
+search_limit = 5
 
 [album_type]
 compilation_album_path = "Compilations/{bucket(the(album.title))}/{the(album.title)} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
 soundtrack_album_path = "Soundtracks/{bucket(the(album.title))}/{the(album.title)} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
-classical_album_path = "Classical/{album.artist}/{album.title} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
+classical_album_path = "Classical/{album_composer_sort(album)}/{album.artist} - {album.title} ({year_reissue(album)}){label_catalognum(album)} [{media_encoding(album)}]"
 
 [filter_extras]
 text_editor = "kate"
-exclude_by_default = ["m3u"]
+exclude_by_default = ["m3u", "nfo", "sfv", "txt"]
 
 [album_art]
 image_viewer = "qimgv {image_path}"
