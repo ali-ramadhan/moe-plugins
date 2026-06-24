@@ -1,24 +1,43 @@
-import moe
+"""Media and encoding plugin for Moe.
+
+Provides a media_encoding() path-template function that summarizes an album's
+source media and audio encoding as one "pretty" string, for example:
+
+    CD FLAC 16bit 44.1kHz
+    Vinyl FLAC 24bit 192kHz
+    US WEB FLAC+MP3 16bit 44.1+48kHz
+    FLAC 16bit 44.1kHz
+    WEB MP3 44.1kHz
+    CD FLAC 16bit 44.1+88.2kHz
+
+It combines the album's media (normalized, so "Digital Media" becomes "WEB"), an
+optional country prefix, and the audio format, bit depth, and sample rate collected
+across all tracks. When tracks differ on a field, the distinct values are joined
+with "+" (e.g. "16+24bit"). The function returns bare text, so add any brackets in
+the template:
+
+    album_path = "{album.title} [{media_encoding(album)}]"
+"""
+
 import re
 
-# This plugin returns "pretty" text formatting for the media + encoding, e.g.
-#   [CD FLAC 16bit 44.1kHz]
-#   [Vinyl FLAC 24bit 192kHz]
-#   [WEB FLAC 16+24bit 48+96kHz]
-#   [WEB MP3+FLAC 44.1+48kHz]
+import moe
+
 
 @moe.hookimpl
 def create_path_template_func():
     return [media_encoding]
+
 
 media_regex_subs = [
     (r"digital\s+media", "WEB"),
     (r"vinyl", "Vinyl"),
 ]
 
+
 def standardized_album_media(album):
     if not album.media:
-        return album.media
+        return ""
 
     for pattern, replacement in media_regex_subs:
         if re.search(pattern, album.media, re.IGNORECASE):
@@ -26,44 +45,41 @@ def standardized_album_media(album):
 
     return album.media
 
-def album_audio_format(album):
-    audio_formats = [track.audio_format for track in album.tracks]
-    audio_formats = list(set(audio_formats))
 
-    if len(audio_formats) == 1:
-        return f"{audio_formats[0].upper()}"
-    else:
-        return "+".join(map(str, audio_formats))
+def album_audio_format(album):
+    formats = sorted({track.audio_format.upper() for track in album.tracks})
+    return "+".join(formats)
+
 
 def album_bit_depth(album):
-    bit_depths = [track.bit_depth for track in album.tracks]
-    bit_depths = list(set(bit_depths))
+    depths = sorted({track.bit_depth for track in album.tracks if track.bit_depth})
+    if not depths:
+        return ""
+    return "+".join(str(depth) for depth in depths) + "bit"
 
-    if len(bit_depths) == 1:
-        return f"{bit_depths[0]}bit"
-    else:
-        return "+".join(map(str, bit_depths)) + "bit"
 
 def pretty_sample_rate(f_Hz):
     f_kHz = f_Hz / 1000
     if f_kHz.is_integer():
         return str(int(f_kHz))
-    else:
-        return str(f_kHz)
+    return str(f_kHz)
+
 
 def album_sample_rate(album):
-    sample_rates = [track.sample_rate for track in album.tracks]
-    sample_rates = list(set(sample_rates))
+    rates = sorted({track.sample_rate for track in album.tracks if track.sample_rate})
+    if not rates:
+        return ""
+    return "+".join(map(pretty_sample_rate, rates)) + "kHz"
 
-    if len(sample_rates) == 1:
-        return f"{pretty_sample_rate(sample_rates[0])}kHz"
-    else:
-        return "+".join(map(pretty_sample_rate, sample_rates)) + "kHz"
 
 def media_encoding(album):
-    media = standardized_album_media(album)
-    audio_format = album_audio_format(album)
-    bit_depth = album_bit_depth(album)
-    sample_rate = album_sample_rate(album)
-    country = f"{album.country} " if album.country else ""
-    return f"{country}{media} {audio_format} {bit_depth} {sample_rate}"
+    parts = [
+        standardized_album_media(album),
+        album_audio_format(album),
+        album_bit_depth(album),
+        album_sample_rate(album),
+    ]
+    encoding = " ".join(part for part in parts if part)
+    if album.country:
+        return f"{album.country} {encoding}"
+    return encoding
